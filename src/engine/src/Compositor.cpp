@@ -356,8 +356,8 @@ gpu::TextureHandle Compositor::createOutputTexture(std::uint32_t width,
 
 void Compositor::render(const core::Project& project, const core::Composition& comp,
                         double seconds, const gpu::TextureHandle& target,
-                        const ExternalTextures* external,
-                        const ExternalKeys* externalKeys) {
+                        const ExternalTextures* external, const ExternalKeys* externalKeys,
+                        const Overlay* overlay) {
     if (target == nullptr || quads_ == nullptr) {
         return;
     }
@@ -368,14 +368,19 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         return;
     }
 
-    // Fit the composition inside the target, preserving its aspect.
+    // Fit the composition inside the target, preserving its aspect. Through the shared
+    // helper, because the viewport has to turn a mouse position into a composition
+    // position and a click two pixels from where the picture was drawn is a click on the
+    // wrong layer.
     const auto compW = static_cast<float>(comp.width);
     const auto compH = static_cast<float>(comp.height);
-    const float fit = std::min(viewW / compW, viewH / compH);
-    const float frameW = compW * fit;
-    const float frameH = compH * fit;
-    const float frameX = (viewW - frameW) * 0.5f;
-    const float frameY = (viewH - frameH) * 0.5f;
+    const FrameFit fit_ =
+        frameFit(static_cast<double>(comp.width), static_cast<double>(comp.height),
+                 static_cast<double>(viewW), static_cast<double>(viewH));
+    const auto frameW = static_cast<float>(fit_.width);
+    const auto frameH = static_cast<float>(fit_.height);
+    const auto frameX = static_cast<float>(fit_.x);
+    const auto frameY = static_cast<float>(fit_.y);
 
     const core::TimeContext ctx = comp.timeContext();
 
@@ -619,6 +624,20 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         pushQuad(unitToLayer.then(layerToComp).then(compToScreen), tint,
                  std::clamp(alpha / 100.0f, 0.0f, 1.0f), item.texture,
                  quadPipelineFor(layer.blend));
+    }
+
+    // Handles and guides, last and on top of everything.
+    //
+    // The scissor is deliberately widened to the whole target first. A layer dragged half
+    // out of frame still has handles, and clipping them to the frame would hide the corner
+    // you are reaching for exactly when you most need it.
+    if (overlay != nullptr && !overlay->empty()) {
+        commands->set_scissor(0, 0, static_cast<std::uint32_t>(viewW),
+                              static_cast<std::uint32_t>(viewH));
+        for (const OverlayQuad& q : *overlay) {
+            pushQuad(q.unitToTarget, Rgb{q.r, q.g, q.b}, q.a, nullptr,
+                     quadPipelineFor(core::BlendMode::Normal));
+        }
     }
 
     commands->end_pass();

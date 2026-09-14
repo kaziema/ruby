@@ -34,6 +34,16 @@ constexpr ToolIcon kTools[] = {
 };
 constexpr int kToolCount = static_cast<int>(std::size(kTools));
 
+}  // namespace
+
+ToolIcon EditorToolBar::toolAt(int index) noexcept {
+    return (index >= 0 && index < kToolCount)
+               ? kTools[static_cast<std::size_t>(index)]
+               : ToolIcon::Selection;
+}
+
+namespace {
+
 // Panel switches. Not tools: they change what the left dock shows rather than what a
 // click in the viewer does, so they get their own run at the end with a divider before
 // them. Putting them in the tool list would mean selecting one deselects your tool, which

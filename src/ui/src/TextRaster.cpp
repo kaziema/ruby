@@ -13,6 +13,25 @@
 namespace ruby::ui {
 namespace {
 
+// The ink of a laid-out string, padded the way the raster pads it.
+//
+// The stroke is centred on the outline, so half of it sits outside the glyph. Padding by
+// the full width rather than half is cheap and leaves room for antialiasing too.
+//
+// Clamped at zero: a negative stroke draws nothing, correctly, but used to feed a negative
+// number in here, which SHRANK the image and clipped the glyphs it was meant to make room
+// for.
+QRectF paddedInk(const core::Layer& layer, const std::vector<LaidOutGlyph>& glyphs,
+                 double pixelsPerPoint) {
+    QRectF ink;
+    for (const LaidOutGlyph& glyph : glyphs) {
+        ink = ink.isNull() ? glyph.bounds : ink.united(glyph.bounds);
+    }
+    const double stroke = std::max(0.0, layer.strokeWidth) * std::max(0.01, pixelsPerPoint);
+    return ink.adjusted(-stroke - 2.0, -stroke - 2.0, stroke + 2.0, stroke + 2.0);
+}
+
+
 // 96 DPI, fixed. A "72pt" heading has to mean the same thing on every machine, and
 // leaving it to the platform means the same project renders differently on two displays.
 // Olive pins this for the same reason.
@@ -189,17 +208,9 @@ TextRaster rasteriseText(const core::Layer& layer, double pixelsPerPoint) {
         return out;
     }
 
-    QRectF ink;
-    for (const LaidOutGlyph& glyph : glyphs) {
-        ink = ink.isNull() ? glyph.bounds : ink.united(glyph.bounds);
-    }
-    // Clamped at zero. A negative stroke drew nothing (correctly) but still fed a
-    // negative number into the padding below, which SHRANK the image and clipped the
-    // glyphs it was supposed to be making room for.
-    const double stroke = std::max(0.0, layer.strokeWidth) * std::max(0.01, pixelsPerPoint);
-    // The stroke is centred on the outline, so half of it sits outside the glyph. Padding
-    // by the full width rather than half is cheap and leaves room for antialiasing too.
-    const QRectF padded = ink.adjusted(-stroke - 2.0, -stroke - 2.0, stroke + 2.0, stroke + 2.0);
+    const QRectF padded = paddedInk(layer, glyphs, pixelsPerPoint);
+    const double stroke =
+        std::max(0.0, layer.strokeWidth) * std::max(0.01, pixelsPerPoint);
 
     const int w = std::max(1, static_cast<int>(std::ceil(padded.width())));
     const int h = std::max(1, static_cast<int>(std::ceil(padded.height())));
@@ -270,6 +281,17 @@ TextRaster rasteriseText(const core::Layer& layer, double pixelsPerPoint) {
 
     out.inkBounds = padded;
     return out;
+}
+
+QSizeF textLayerSize(const core::Layer& layer, double pixelsPerPoint) {
+    const std::vector<LaidOutGlyph> glyphs = layOutText(layer, pixelsPerPoint);
+    if (glyphs.empty()) {
+        return {};
+    }
+    const QRectF padded = paddedInk(layer, glyphs, pixelsPerPoint);
+    // Ceiled, because the raster allocates whole pixels and the quad is sized from the
+    // image. A box half a pixel short of the picture is still a box that does not fit it.
+    return {std::ceil(padded.width()), std::ceil(padded.height())};
 }
 
 }  // namespace ruby::ui

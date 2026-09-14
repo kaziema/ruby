@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "ruby/core/Document.h"
+#include "ruby/core/Transform.h"
 #include <map>
 #include <memory>
 #include <string>
@@ -46,10 +47,34 @@ public:
     };
     using ExternalTextures = std::map<core::LayerId, External>;
 
+    // Flat shapes drawn on top of the picture, in target pixels.
+    //
+    // Selection handles and the like. Kept as a transform from the unit quad rather than a
+    // rectangle for the same reason layers are: a rectangle cannot express rotation, and
+    // handles on a rotated layer that stay upright are handles that lie about the layer.
+    //
+    // The engine draws what it is given and never learns what a handle is. That keeps the
+    // decision about what an editor shows you out of the renderer, where it would be one
+    // more thing the render path has an opinion about.
+    struct OverlayQuad {
+        core::Transform2D unitToTarget;
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+    };
+    using Overlay = std::vector<OverlayQuad>;
+
     void render(const core::Project& project, const core::Composition& comp,
                 double seconds, const gpu::TextureHandle& target,
                 const ExternalTextures* external = nullptr,
-                const ExternalKeys* externalKeys = nullptr);
+                const ExternalKeys* externalKeys = nullptr,
+                const Overlay* overlay = nullptr);
+
+    // Where the frame lands in a target of this size. The viewport needs the same answer
+    // the renderer used, or hit testing and drawing disagree.
+    [[nodiscard]] static FrameFit fitFor(const core::Composition& comp, double targetWidth,
+                                         double targetHeight) noexcept {
+        return frameFit(static_cast<double>(comp.width), static_cast<double>(comp.height),
+                        targetWidth, targetHeight);
+    }
 
     // The preview cache's RAM tier: every layer's finished effect output, keyed on what
     // that output depended on. Exposed so the window can report what is ready and so a

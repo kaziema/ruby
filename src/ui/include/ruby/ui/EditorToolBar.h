@@ -4,6 +4,8 @@
 #include <QRect>
 #include <QWidget>
 
+#include "ruby/ui/ToolIcons.h"
+
 namespace ruby::ui {
 
 // The 30px tool bar: nine 24x22 tool buttons, a divider, and two labelled switches
@@ -20,6 +22,14 @@ public:
 
 signals:
     void toolSelected(int index);
+
+public:
+    // Which tool an index means. The bar emits an index because that is what it knows;
+    // anything that has to act on the choice needs the tool itself, and a second copy of
+    // the table somewhere else is a second copy that can disagree.
+    [[nodiscard]] static ToolIcon toolAt(int index) noexcept;
+
+signals:
 
     // Which panel group the left dock should show. 0 is Project, 1 is Effects & Presets.
     void panelSelected(int index);

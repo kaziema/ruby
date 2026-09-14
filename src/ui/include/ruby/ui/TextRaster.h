@@ -67,4 +67,16 @@ struct TextRaster {
 
 [[nodiscard]] TextRaster rasteriseText(const core::Layer& layer, double pixelsPerPoint);
 
+// How big the rasterised image will be, without rasterising it.
+//
+// A text layer's size is NOT its ink: the raster pads by the stroke width plus a couple of
+// pixels so a heavy outline is not clipped, and the compositor sizes the layer's quad from
+// the image it is handed. Anything that needs to know where a text layer is on screen -
+// selection handles, hit testing, align - has to use this same number, or it draws a box
+// around a rectangle that is not the one being drawn.
+//
+// Factored out of rasteriseText rather than reimplemented beside it, so the padding rule
+// cannot be changed in one place and not the other.
+[[nodiscard]] QSizeF textLayerSize(const core::Layer& layer, double pixelsPerPoint);
+
 }  // namespace ruby::ui

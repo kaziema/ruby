@@ -414,17 +414,20 @@ core::SizeOf MainWindow::layerSizes() {
                 }
                 return {compW, compH};
             case core::LayerKind::Text: {
-                // Measured from the laid-out glyphs rather than rasterised. The ink is the
-                // layer: a title is as wide as the word, not as wide as the frame, and
-                // centring it on the frame's width would centre the wrong thing.
-                QRectF ink;
-                for (const LaidOutGlyph& g : layOutText(layer, 1.0)) {
-                    ink = ink.isNull() ? g.bounds : ink.united(g.bounds);
-                }
-                if (ink.isNull() || ink.width() <= 0.0 || ink.height() <= 0.0) {
-                    return {0.0, 0.0};
-                }
-                return {ink.width(), ink.height()};
+                // The size of the IMAGE the rasteriser will produce, not the size of the
+                // ink inside it.
+                //
+                // This used to union the glyph bounds, which is smaller: the raster pads
+                // by the stroke width plus a couple of pixels so a heavy outline is not
+                // clipped, and the compositor sizes the layer's quad from the image it is
+                // handed. With a 5px stroke the two answers differed by 14px per axis, so
+                // the viewer drew selection handles around a rectangle that was not the
+                // one on screen and every click landed slightly off.
+                //
+                // Measured without rasterising, through the same function the rasteriser
+                // uses, so the padding rule cannot drift between them.
+                const QSizeF size = textLayerSize(layer, 1.0);
+                return {size.width(), size.height()};
             }
             case core::LayerKind::Audio:
                 return {0.0, 0.0};  // no picture, so no box
@@ -2599,6 +2602,40 @@ QWidget* MainWindow::buildBody() {
     inspector_ = new InspectorView;
     inspector_->setComposition(&comp);
     inspectorTabs_->addPage(inspector_);
+    if (viewport_ != nullptr) {
+        // The viewer needs the same layer sizes the align maths uses: the media pool for
+        // footage, the layout for text. It cannot work either out on its own.
+        viewport_->setLayerSizes(layerSizes());
+
+        // Clicking a layer in the picture is a real selection, routed through the timeline
+        // so the two panels never hold different opinions about what is selected.
+        connect(viewport_, &GpuViewport::layerPicked, this, [this](core::LayerId id) {
+            if (timelinePanel_ != nullptr) {
+                timelinePanel_->selectLayer(id);
+                timelinePanel_->revealAnimated(id);
+            }
+            if (inspector_ != nullptr) {
+                inspector_->setSelectedLayer(id);
+            }
+            updateAlignAvailability();
+        });
+
+        // One undo step per drag, bracketed the same way a timeline drag is.
+        connect(viewport_, &GpuViewport::manipulationBegan, this,
+                [this](const QString& label) { recordEdit(label); });
+        connect(viewport_, &GpuViewport::layerTransformed, this, [this] {
+            if (inspector_ != nullptr) {
+                inspector_->update();
+            }
+            markDirty();
+        });
+        connect(viewport_, &GpuViewport::manipulationEnded, this, [this] {
+            if (timelinePanel_ != nullptr) {
+                timelinePanel_->refresh();
+            }
+        });
+    }
+
     alignPanel_ = new AlignPanel;
     inspectorTabs_->addPage(alignPanel_);
     connect(alignPanel_, &AlignPanel::alignRequested, this,
@@ -2653,6 +2690,11 @@ QWidget* MainWindow::buildBody() {
     connect(timelinePanel, &TimelinePanel::selectionChanged, inspector_,
             [this](core::LayerId id) {
                 inspector_->setSelectedLayer(id);
+                if (viewport_ != nullptr) {
+                    viewport_->setSelectedLayer(
+                        id == 0 ? std::optional<core::LayerId>{}
+                                : std::optional<core::LayerId>{id});
+                }
                 updateAlignAvailability();
             });
     // Cmd-clicking a second layer changes the set without changing the primary, so the
@@ -2733,6 +2775,15 @@ QWidget* MainWindow::buildBody() {
     });
 
     // The Snapping switch finally does something.
+    // The tools stop being decoration. Selection, Rotation and Anchor do something in the
+    // viewer now; the rest still swallow their clicks there rather than silently acting
+    // like Selection.
+    connect(toolBar_, &EditorToolBar::toolSelected, this, [this](int index) {
+        if (viewport_ != nullptr) {
+            viewport_->setTool(EditorToolBar::toolAt(index));
+        }
+    });
+
     connect(toolBar_, &EditorToolBar::snappingToggled, timelinePanel,
             &TimelinePanel::setSnapping);
 

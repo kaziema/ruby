@@ -1,5 +1,6 @@
 #include "ruby/engine/RenderGraph.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -46,6 +47,21 @@ NodeHash hashTransform(const core::Transform2D& t, NodeHash seed) noexcept {
 }
 
 }  // namespace
+
+FrameFit frameFit(double compWidth, double compHeight, double targetWidth,
+                  double targetHeight) noexcept {
+    FrameFit out;
+    if (compWidth <= 0.0 || compHeight <= 0.0 || targetWidth <= 0.0 ||
+        targetHeight <= 0.0) {
+        return out;
+    }
+    out.scale = std::min(targetWidth / compWidth, targetHeight / compHeight);
+    out.width = compWidth * out.scale;
+    out.height = compHeight * out.scale;
+    out.x = (targetWidth - out.width) * 0.5;
+    out.y = (targetHeight - out.height) * 0.5;
+    return out;
+}
 
 NodeHash hashBytes(const void* data, std::size_t size, NodeHash seed) noexcept {
     const auto* bytes = static_cast<const unsigned char*>(data);

@@ -25,6 +25,37 @@ namespace ruby::engine {
 // what makes it testable, and it means a cache can be consulted before a single texture is
 // touched: the cheapest render is the one that never starts.
 
+// Where the composition's frame lands inside a target of a given size.
+//
+// The composition has its own aspect ratio, which is almost never the shape of the window,
+// so it is fitted and letterboxed. Both the renderer and anything that has to turn a mouse
+// position into a composition position need this answer, and they have to get the SAME
+// answer: a click that lands two pixels from where the picture was drawn is a click on the
+// wrong layer. One function, two callers, no second copy of the arithmetic.
+struct FrameFit {
+    double x = 0.0;      // left edge of the frame, in target pixels
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+    double scale = 1.0;  // target pixels per composition pixel, uniform
+
+    [[nodiscard]] constexpr double toCompX(double px) const noexcept {
+        return scale > 0.0 ? (px - x) / scale : 0.0;
+    }
+    [[nodiscard]] constexpr double toCompY(double py) const noexcept {
+        return scale > 0.0 ? (py - y) / scale : 0.0;
+    }
+    [[nodiscard]] constexpr double toTargetX(double cx) const noexcept {
+        return x + cx * scale;
+    }
+    [[nodiscard]] constexpr double toTargetY(double cy) const noexcept {
+        return y + cy * scale;
+    }
+};
+
+[[nodiscard]] FrameFit frameFit(double compWidth, double compHeight, double targetWidth,
+                                double targetHeight) noexcept;
+
 using NodeHash = std::uint64_t;
 
 struct RenderNode {
