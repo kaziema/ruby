@@ -150,7 +150,7 @@ to cut by hand, build your own presets against exactly the same effects we use, 
 in real time. You will not be able to detect a beat, cut to one, render a file, or get our
 packs.
 
-See [LICENSE-FAQ.md](LICENSE-FAQ.md) for the plain-language version.
+See [docs/LICENSE-FAQ.md](docs/LICENSE-FAQ.md) for the plain-language version.
 
 ## License
 
