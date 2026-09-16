@@ -1,9 +1,6 @@
 # Internal notebook — not for the repo
 NOTEBOOK.md
 
-# Draft README. Tracked once it stops changing every day.
-README.md
-
 # --- Open-core boundary (decision D6) ----------------------------------------
 # Three things never enter the public repo. Two modules:
 #   delivery  render + export
