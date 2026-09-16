@@ -8,78 +8,65 @@ Working title. Cross-platform C++, Qt 6, GPU compositing.
 
 ## What this is
 
-After Effects is the tool the edit community actually uses, and it fights them the entire
-way. It is expensive, it is slow to preview, its learning curve is vertical, and the whole
-preset economy it supports is built on sand: a `.ffx` file is a list of references to
-plugins, so the moment you do not own Sapphire or Twixtor, the preset you paid for opens as
-a dead layer.
+Ruby is a Non-Linear editor inspired heavily by After Effects. Majority of short form AMV/"edits" 
+on social platforms are done in After Effects, due to it's
+extensive power house features. 
+Unfortunately, it has a very intense learning curve as the software was designed with motion graphics in mind, 
+not specifically video editing. 
+Also, to maximize it's potentioal you have to download plugin suites. These suites are ridiculously expensive and, if you are to be a little covert about 
+where you source it from, can be dangerous to install cracked patches for.
 
-We took apart a real, commercially sold editing pack to check that. Of its 26 presets, 23
-require paid third-party plugins to function at all. That is the problem.
+That's where the idea for Ruby was made. I wanted to make an editor that was as intensive with the powerhouse tools and 
+features as After Effects, designed specifically for video editors. 
 
+### How the idea formed
+After downloading ten different packs for premiere pro that had no mention of requiring a host of suite plugins (and then finding out that those plugins still cost the same as they did a decade ago), I decided to research into not only how NLE's were built but also how they infrastructure exportable items such as presets (json, JavaScript, etc.)  
+I took apart 5 real, commercially sold editing pack to check that. Out of their almost 150 individual presets, 148
+require paid third-party plugins to function at all, with no notice that they were required. That is no beuno.
+
+## Who this is for and what is being delivered
 This is an editor built for that audience specifically, with three things AE structurally
 cannot offer.
 
-**Presets always work.** Every effect ships with the app. There is no third-party plugin
-layer, so there is no missing-plugin failure mode. A preset is one file, you drag it in, it
-works, on every install, forever. The only way it can fail is if the pack is newer than your
+**Presets always work.** Every effect ships within the app, and third party presets will require NO third part plugin suite. A preset is one file and it
+works on every install, forever. The only way it can fail is if the pack is newer than your
 app, and the fix for that is "update the app," not "go buy a $600 plugin suite."
 
 **The effects are meant to be plugin grade, colour especially.** That promise above is
-worthless if the built-ins are worse than what people are currently paying for. Of the 9 colour
-presets in that pack we took apart, 8 needed paid plugins, and they all followed the same
-recipe with Magic Bullet Looks in the middle of it. So the target is specific: one Look effect
-with a properly ordered internal chain, float linear-light processing throughout, real tonal
-control rather than brightness and contrast sliders, and film character like halation, bloom
-and grain. Compositing already happens in linear light, which is the single biggest reason
-stock effects tend to look worse than the paid ones.
+worthless if the built-ins are worse than what people are currently paying for.
 
-**Presets are resolution and tempo independent.** Every parameter declares its unit. A blur
-radius stored as a percentage of the frame diagonal survives being moved from 1920x1080 to
-1080x1920. A transition stored in beats survives being moved from a 90 BPM song to a 174 BPM
+**Presets are resolution and tempo independent.** Every parameter declares its unit. A transition stored in beats survives being moved from a 90 BPM song to a 174 BPM
 one. AE stores pixels and frames, which is why pack authors ship separate 30fps and 60fps
 versions of everything.
 
 **The beat is a first-class object.** The project analyzes your track once on import and
 owns a real beat grid with downbeats. Keyframes quantize to it, effects can be driven by it
-directly, and cuts land on it. Not markers you place by hand.
+directly, and cuts land on it. 
 
 ## Current Status
 
-**Pre-alpha, but not empty.** There's a real GPU compositor behind the window now, not just
-a themed shell. Treat anything below not listed as done as aspirational, and treat the
-roadmap in `NOTEBOOK.md` as intent, not a promise.
-
+**Pre-alpha** 
 Done so far:
 - Real GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied
   alpha
-- 8 built-in effects, all running on the real adapter: Grade, Lift Gamma Gain, Gaussian Blur,
+- 8 built-in effects running on a real adapter: Grade, Lift Gamma Gain, Gaussian Blur,
   Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
-- Direct manipulation in the viewer: select, move, rotate, and resize a layer by dragging it,
-  not just by typing numbers into the inspector
+- Direct manipulation in the viewer: select, move, rotate, and resize a layer by dragging it
 - Multi-layer selection, align, and distribute
 - Timeline with keyframes, effect stacks, and a moveable-panel workspace (drag panels
-  between tabs, like a real dock)
-- A render graph and a RAM-tier preview cache, so scrubbing doesn't re-render effects that
-  didn't change
+  between tabs)
+- A render graph and a RAM-tier preview cache
 - Video and audio import and decode (FFmpeg), a real-time audio mixer, and a per-layer
   keyframeable Audio Level control
-- Project save/load (`.rbypr`, JSON) with a schema + migration harness, so old projects
-  keep opening as the app changes
+- Project save/load (`.rbypr`, JSON) with a schema + migration harness
 - 31 automated tests, `ctest`-driven, covering the document model, the render graph, the
   mixer, and the viewer's hit-testing math
 
 Still to do:
-- **Beat detection and the beat map itself.** The private tree (`src/beat`) exists as an
-  interface and a stub; the actual detector isn't wired in yet. This is the pillar feature
-  and it isn't built.
-- **Render and export.** There is no way to get a file out of Ruby yet. The compositor can
-  put pixels on screen; it cannot write them to disk. GPU texture readback doesn't exist
-  either, which also blocks the preview cache's disk tier.
-- **Masking, as a framework concern**, transitions, shape and adjustment layers. Timeline
-  switches for some of these already exist and are inert.
-- **The preset ecosystem.** Deliberately last. A preset format exists (`schemas/preset/`);
-  nothing authors or ships one yet.
+- **Beat detection and the beat map itself.**
+- **Render and export.** 
+- **Masking, as a framework concern**
+- **The preset ecosystem.** 
 - Windows and Linux. macOS is the only platform built and tested.
 
 ## Built on
@@ -146,21 +133,6 @@ tests/        31 tests, run via ctest
 schemas/      effect and preset JSON schemas
 ```
 
-Two decisions in `src/core` are worth reading before touching anything, because they are
-permanent contracts rather than implementation details.
-
-`Units.h` is why presets are portable. Time is stored in beats or seconds, never frames
-unless an effect explicitly opts in, because a frame is not a unit of time, it is time
-divided by whatever framerate a project happens to use.
-
-`Identity.h` is why presets keep working across versions. Effect IDs and parameter keys are
-immortal. Display order and labels are not. Deleting a parameter retires its key forever.
-Changing a default requires pinning the old one so existing projects do not silently shift.
-These rules are enforced by `validate()` and covered by tests, so breaking one fails the
-build instead of quietly corrupting every preset ever made. This is adapted from After
-Effects' own disk-ID system, which is the one part of AE's architecture that is unambiguously
-correct.
-
 ## What is not in this repo
 
 This is open core. Three things ship only in the paid build:
@@ -169,9 +141,7 @@ This is open core. Three things ship only in the paid build:
 - **Beat detection and beat editing**
 - **The handcrafted preset packs**
 
-The entire effects library is here, deliberately. A preset is worthless if the effect under
-it is missing, and "presets always work" is the whole promise, so withholding effects would
-break that promise on our own repo.
+The entire effects library is here, deliberately.
 
 A build from this tree will be a real compositor with a complete effect set. You will be able
 to cut by hand, build your own presets against exactly the same effects we use, and preview
