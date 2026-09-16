@@ -11,21 +11,15 @@ Cross-platform C++, Qt 6, GPU compositing.
 ## What this is
 
 Ruby is a non-linear editor inspired heavily by After Effects. The majority of short-form AMVs/"edits" 
-
 on social platforms are done in After Effects, due to its
-
 extensive powerhouse features. 
 
 Unfortunately, it has a very intense learning curve, as the software was designed with motion graphics in mind. 
-
 not specifically video editing. 
-
 Also, to maximize its potential, you have to download plugin suites. These suites are ridiculously expensive and, if you are to be a little covert about 
-
 where you source it from, can be dangerous to install cracked patches for.
 
 That's where the idea for Ruby was made. I wanted to make an editor that was as intensive with the powerhouse tools and 
-
 features, such as After Effects, designed specifically for video editors. 
 
 ### How the idea formed
@@ -33,35 +27,26 @@ features, such as After Effects, designed specifically for video editors.
 After downloading ten different packs for Premiere Pro that had no mention of requiring a host of suite plugins (and then finding out that those plugins still cost the same as they did a decade ago), I decided to research not only how NLEs were built but also how they infrastructure exportable items such as presets (JSON, JavaScript, etc.).  
 
 I took apart 5 real, commercially sold editing packs to check that. Out of their almost 150 individual presets, 148
-
 require paid third-party plugins to function at all, with no notice that they were required. That is no bueno.
 
 ## Who this is for and what is being delivered
 
-This is an editor built for that audience specifically, with three things AE structurally
+This is an editor built for that audience specifically, with four things AE structurally
+cannot offer:
 
-cannot offer.
-
-Presets always work. Every effect ships within the app, and third-party presets will require NO third-party plugin suite. A preset is one file, and it
-
+**Presets always work**. Every effect ships within the app, and third-party presets will require NO third-party plugin suite. A preset is one file, and it
 works on every install, forever. The only way it can fail is if the pack is newer than your
-
 app, and the fix for that is "update the app," not "go buy a $600 plugin suite."
 
-The effects are meant to be plug-in grade, especially in color. That promise above is
-
+**The effects are meant to be plug-in grade, especially in color.** The promise above is
 worthless if the built-ins are worse than what people are currently paying for.
 
-Presets are resolution and tempo independent. Every parameter declares its unit. A transition stored in beats survives being moved from a 90 BPM song to a 174 BPM
-
+**Presets are resolution and tempo independent.** Every parameter declares its unit. A transition stored in beats survives being moved from a 90 BPM song to a 174 BPM
 one. AE stores pixels and frames, which is why pack authors ship separate 30 fps and 60 fps.
-
 versions of everything.
 
-The beat is a first-class object. The project analyzes your track once on import and
-
+**Beats and vocals are first-class objects.** The project analyzes your track once on import and
 owns a real beat grid with downbeats. Keyframes quantize to it; effects can be driven by it.
-
 directly, and cuts land on it. 
 
 ## Current Status
@@ -221,11 +206,8 @@ This is open core. Three things ship only in the paid build:
 The entire effects library is here, deliberately.
 
 A build from this tree will be a real compositor with a complete effect set. You will be able
-
 to cut by hand, build your own presets against exactly the same effects we use, and preview
-
 in real time. You will not be able to detect a beat, cut to one, render a file, or get our
-
 packs.
 
 See [LICENSE-FAQ.md](LICENSE-FAQ.md) for the plain-language version.
@@ -233,13 +215,9 @@ See [LICENSE-FAQ.md](LICENSE-FAQ.md) for the plain-language version.
 ## License
 
 [Business Source License 1.1](LICENSE). This is a source available, not open source, and
-
 the distinction matters enough that we are not going to blur it.
-
 Use it for anything, including commercial work, and sell everything you make with it. Do not
-
-Take this code and ship a competing editor. Each released version converts to GPL v3
-
+take this code and ship a competing editor. Each released version converts to GPL v3
 years after its release.
 
 The bundled preset packs are not in this repo and are not covered by this license.
@@ -247,12 +225,8 @@ The bundled preset packs are not in this repo and are not covered by this licens
 ## Contributing
 
 Sign the [CLA](CLA.md) in your first pull request. It is one page, and it exists because
-
-Contributed code has to be usable in the paid build. Without it, every contributor keeps
-
+contributed code has to be usable in the paid build. Without it, every contributor keeps
 separate copyright over their patch, and the project cannot ship.
-
 Contributions are welcome, but the project is at the stage where most of it is still being
-
 decided. Open an issue before writing anything substantial.
 
