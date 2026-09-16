@@ -1,8 +1,8 @@
 # Ruby
 
-A layer-based compositor and motion tool for people who make edits.
+A layer-based compositor and motion tool for video editors.
 
-Working title. Cross-platform C++, Qt 6, GPU compositing.
+**Cross-platform C++, Qt 6, GPU compositing.**
 
 ---
 
