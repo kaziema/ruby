@@ -1,9 +1,5 @@
-// The layer column's switches, driven the way a user drives them: by clicking.
-//
-// Every one of these is a few pixels wide and sits next to seven other things a few
-// pixels wide, so the interesting failure is never "the toggle does not toggle". It is
-// "the click landed on the neighbour". These tests click at coordinates derived from the
-// same metrics the painter uses, so a column that moves moves the test with it.
+// Layer column switch clicks. Coordinates derive from the same metrics the painter uses,
+// so a moved column moves the test with it.
 
 #include <QApplication>
 #include <QMouseEvent>
@@ -26,8 +22,7 @@ void check(bool cond, const char* what) {
     }
 }
 
-// The columns, recomputed from Theme.h exactly as TimelineView does, right to left from
-// the track edge. If these two ever disagree the test is the thing that says so.
+// Recomputed from Theme.h, right to left from the track edge, matching TimelineView.
 constexpr int kTrack = kLayerColumnW;
 constexpr int kNav = kTrack - kKeyNavW;
 constexpr int kParent = kNav - kParentW;
@@ -57,8 +52,7 @@ void click(ui::TimelineView& view, int x, int y) {
     QApplication::sendEvent(&view, &release);
 }
 
-// A view showing one layer, wide enough that the track exists to the right of the
-// columns rather than being clipped away.
+// One layer, wide enough that the track isn't clipped off to the right of the columns.
 struct Fixture {
     core::Project project;
     core::Composition* comp = nullptr;
@@ -71,8 +65,7 @@ struct Fixture {
         layer.outPoint = core::TimeValue::seconds(5.0);
         id = layer.id;
         view.setComposition(comp);
-        // Opening a composition selects its first layer, which would make every "this
-        // click does not select" check below pass for the wrong reason.
+        // Opening a comp auto-selects the first layer; clear it so selection checks are valid.
         view.clearSelection();
         view.resize(kLayerColumnW + 400, 300);
     }
@@ -80,9 +73,7 @@ struct Fixture {
     core::Layer& layer() { return *comp->find(id); }
 };
 
-// The columns must not overlap, in the order they are painted. Three separate cropping
-// bugs have come from two columns each deciding their own position and happening to
-// agree until one of them moved.
+// Columns must not overlap, in paint order.
 void the_columns_are_laid_out_end_to_end() {
     check(kAvToggleW < kAvToggleW + kIndexW, "A/V before the index");
     check(kAvToggleW + kIndexW + kLayerNameW <= kSwitches + kSwitchesW,
@@ -125,8 +116,7 @@ void a_locked_layer_refuses_to_be_selected() {
     check(f.view.selectedLayer().has_value(), "unlocking gives it back");
 }
 
-// The eye, audio and solo are deliberately still live on a locked layer: none of them
-// change what the layer is, and half of why you lock one is to keep looking at it.
+// Eye/audio/solo stay live on a locked layer; locking doesn't hide what you locked.
 void a_locked_layer_still_hides_and_solos() {
     Fixture f;
     click(f.view, 64, firstRowY());
@@ -156,22 +146,18 @@ void the_fx_switch_turns_every_effect_off_and_back_on() {
           "and the next turns them all back on");
 }
 
-// The seven inert switches must swallow their clicks. Falling through to selection would
-// make a switch that does nothing feel like a click that missed.
+// Inert switches must swallow clicks, not fall through to selection.
 void an_inert_switch_does_not_select_the_layer() {
     Fixture f;
     click(f.view, switchX(kShySwitch), firstRowY());
     check(!f.view.selectedLayer().has_value(), "shy swallows the click");
 
-    // And fx on a layer with no effects is not drawn, so it has nothing to swallow and
-    // must not select either.
+    // fx with no effects isn't drawn, so it has nothing to swallow either.
     click(f.view, switchX(kFxSwitch), firstRowY());
     check(!f.view.selectedLayer().has_value(), "an undrawn fx does not select");
 }
 
-// The Parent cell used to be hit-tested all the way to the track edge, which is straight
-// over the keyframe navigator's column. Clicking "next key" on a layer row opened the
-// parent menu instead.
+// Regression: Parent used to be hit-tested over the navigator column, so "next key" opened the parent menu.
 void the_parent_cell_stops_before_the_navigator() {
     Fixture f;
     core::Property* position = f.layer().find("position");
@@ -186,16 +172,13 @@ void the_parent_cell_stops_before_the_navigator() {
     position->addKey(key, ctx);
 
     f.view.setCurrentTime(0.0);
-    // "Next key", in the right third of the navigator column. If Parent still claimed
-    // this far right the click would open the parenting menu and the playhead would sit
-    // where it was.
+    // "Next key", right third of the navigator column.
     click(f.view, kNav + kKeyNavW - 6, firstRowY());
     check(f.view.currentTime() > 1.9 && f.view.currentTime() < 2.1,
           "the navigator moved the playhead to the key");
 }
 
-// Group headers collapse. Height is the measurable thing from outside the class, the
-// same currency test_timelinerows works in.
+// Group headers collapse; height is the measurable signal from outside the class.
 void a_group_collapses_and_reopens() {
     Fixture f;
     f.view.toggleExpanded(f.id);
@@ -204,8 +187,7 @@ void a_group_collapses_and_reopens() {
     check(openHeight > kColumnHeaderH + kLayerRowH,
           "the layer opens onto its transform rows");
 
-    // The group twirl, one indent step in from the layer's own. The Transform header is
-    // the first row under the layer.
+    // Transform header is the first row under the layer.
     const int transformRowY = kColumnHeaderH + kLayerRowH + kPropertyRowH / 2;
     click(f.view, kGroupTwirl, transformRowY);
 
@@ -218,8 +200,7 @@ void a_group_collapses_and_reopens() {
     check(f.view.contentHeight() == openHeight, "and opening it gives them back");
 }
 
-// The group header is a label everywhere except the twirl. Clicking the word "Transform"
-// must not shut it, because the same row is the right-click target for an effect.
+// Clicking the "Transform" label must not shut the group; that row is also the right-click target for an effect.
 void the_group_label_is_not_a_button() {
     Fixture f;
     f.view.toggleExpanded(f.id);
@@ -239,10 +220,7 @@ void shutting_a_group_does_not_select_the_layer() {
     check(!f.view.selectedLayer().has_value(), "the twirl is not a selection");
 }
 
-// The lock has to hold against every way of selecting a layer, not only a left click on
-// its name. The right-click menu selects the row it was opened on before showing itself,
-// and every layer command in the window acts on the selection, so a locked layer that
-// could be selected that way could still be deleted.
+// Lock must hold against selectLayer() directly, not just a click on the name.
 void nothing_selects_a_locked_layer() {
     Fixture f;
     click(f.view, 64, firstRowY());
@@ -257,8 +235,7 @@ void nothing_selects_a_locked_layer() {
     check(f.view.selectedLayer().has_value(), "and takes it once the padlock is open");
 }
 
-// Preserve Transparency and Track Matte are drawn as controls and do nothing yet. Like
-// the seven inert switches, they must swallow the click rather than selecting the layer.
+// Preserve Transparency and Track Matte do nothing yet but must still swallow the click.
 void the_inert_mode_cells_swallow_their_clicks() {
     Fixture f;
     const int preserve = kPreserve + kPreserveW / 2;
@@ -270,13 +247,11 @@ void the_inert_mode_cells_swallow_their_clicks() {
     click(f.view, trkMat, firstRowY());
     check(!f.view.selectedLayer().has_value(), "Track Matte swallows the click");
 
-    // Not tested here: the Mode cell next door. It opens a blocking menu, so clicking it
-    // from a test hangs the test rather than failing it.
+    // Mode cell not tested: it opens a blocking menu that would hang the test.
 }
 
 // --- multi-layer selection ---------------------------------------------------
 
-// A fixture with a stack, so range selection has something to range over.
 struct Stack {
     core::Project project;
     core::Composition* comp = nullptr;
@@ -291,9 +266,7 @@ struct Stack {
             comp->find(id)->outPoint = core::TimeValue::seconds(5.0);
             ids.push_back(id);
         }
-        // Topmost first, so ids.front() is the BOTTOM of the stack: addLayer puts each new
-        // one on top. Worth stating because a range test that assumes otherwise passes for
-        // the wrong reason.
+        // addLayer puts each new layer on top, so ids.front() is the bottom of the stack.
         view.setComposition(comp);
         view.clearSelection();
         view.resize(kLayerColumnW + 400, 400);
@@ -326,8 +299,7 @@ void toggling_adds_and_removes() {
     check(!s.view.isSelected(s.ids[1]), "and it is the right one that left");
 }
 
-// Range works by row order, not by id. Ids are creation order, and a layer dragged up the
-// stack would otherwise select a run that does not match what the user is pointing at.
+// Range works by row order, not id (ids are creation order and don't track reordering).
 void a_range_follows_the_stack_not_the_ids() {
     Stack s(5);
     s.view.selectLayer(s.comp->layers[0].id, SelectMode::Replace);
@@ -340,8 +312,7 @@ void a_range_follows_the_stack_not_the_ids() {
     check(!s.view.isSelected(s.comp->layers[4].id), "and nothing beyond it");
 }
 
-// Shift-clicking again re-extends from the same end rather than pivoting around wherever
-// the range last finished. Dragging a range out and then shortening it is one gesture.
+// Shift-click re-extends from the same anchor rather than pivoting at the last endpoint.
 void the_range_anchor_stays_put() {
     Stack s(5);
     s.view.selectLayer(s.comp->layers[0].id, SelectMode::Replace);
@@ -353,8 +324,7 @@ void the_range_anchor_stays_put() {
     check(s.view.isSelected(s.comp->layers[0].id), "the anchor is still in");
 }
 
-// A locked layer refuses selection however it is asked, including from inside a range.
-// Every layer command works off the selection, so this is what the padlock means.
+// A locked layer refuses selection even from inside a range.
 void a_range_steps_over_locked_layers() {
     Stack s(4);
     s.layer(s.comp->layers[1].id).locked = true;

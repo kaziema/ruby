@@ -8,9 +8,8 @@
 #include "NativeSurface.h"
 #include "ruby/gpu/GpuDevice.h"
 
-// Dawn backend. This is the only file in the project that knows WebGPU exists;
-// everything above talks to GpuDevice. If Dawn ever becomes a liability, a second
-// backend lands beside this file and nothing else changes.
+// Dawn backend — the only file that knows WebGPU exists; everything above talks to
+// GpuDevice.
 
 namespace ruby::gpu {
 namespace {
@@ -89,8 +88,8 @@ private:
     TextureDesc desc_;
 };
 
-// The swapchain owns its backbuffers, so this wraps one without taking ownership of
-// the allocation. It only lives as long as the frame it was acquired for.
+// Wraps a swapchain backbuffer without owning it; valid only for the frame it was
+// acquired for.
 class SwapchainTexture final : public Texture {
 public:
     SwapchainTexture(wgpu::Texture texture, std::uint32_t w, std::uint32_t h,
@@ -320,8 +319,8 @@ public:
           device_(std::move(device)),
           queue_(device_.GetQueue()),
           description_(std::move(description)) {
-        // One sampler for everything. Linear filtering with clamped edges is right for
-        // every 2D image op we do; anything needing otherwise can get its own later.
+        // One sampler for everything — linear filtering + clamped edges covers every
+        // 2D op we do so far.
         wgpu::SamplerDescriptor sd{};
         sd.magFilter = wgpu::FilterMode::Linear;
         sd.minFilter = wgpu::FilterMode::Linear;
@@ -346,10 +345,8 @@ public:
             return nullptr;
         }
 
-        // Take whatever format the platform prefers rather than assuming BGRA8.
-        // Prefer an sRGB surface. Then we composite in linear light and the hardware
-        // applies the display transform on write, instead of every shader encoding by
-        // hand and getting it subtly wrong.
+        // Uses whatever format the platform prefers, favoring sRGB — hardware applies
+        // the linear-to-display transform on write instead of every shader by hand.
         wgpu::SurfaceCapabilities caps{};
         surface.GetCapabilities(adapter_, &caps);
 
@@ -427,10 +424,8 @@ public:
         moduleDesc.label = wgpu::StringView(label.data(), label.size());
         wgpu::ShaderModule module = device_.CreateShaderModule(&moduleDesc);
 
-        // Source colour is PREMULTIPLIED, which is what lets these compose as plain
-        // blend equations. Alpha is handled the same way in every mode: the destination
-        // keeps whatever coverage it had plus what this draw adds. Only the colour
-        // channels differ, because only colour is what a blend mode is about.
+        // Source color is PREMULTIPLIED, so these compose as plain blend equations.
+        // Alpha handling is identical across modes; only the color factors differ.
         wgpu::BlendState blend{};
         blend.alpha.operation = wgpu::BlendOperation::Add;
         blend.alpha.srcFactor = wgpu::BlendFactor::One;
@@ -439,14 +434,14 @@ public:
 
         switch (blend_preset) {
             case BlendPreset::AlphaOver:
-                // s + d*(1-a). With premultiplied source this is identical to the
-                // straight-alpha SrcAlpha/OneMinusSrcAlpha it replaces.
+                // s + d*(1-a); equivalent to straight-alpha SrcAlpha/OneMinusSrcAlpha
+                // with premultiplied source.
                 blend.color.srcFactor = wgpu::BlendFactor::One;
                 blend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
                 break;
             case BlendPreset::Add:
-                // s + d. Premultiplication is what makes a half-transparent layer add
-                // half as much instead of all of it.
+                // s + d; premultiplication makes a half-transparent layer add half as
+                // much, not all of it.
                 blend.color.srcFactor = wgpu::BlendFactor::One;
                 blend.color.dstFactor = wgpu::BlendFactor::One;
                 break;
@@ -456,8 +451,8 @@ public:
                 blend.color.dstFactor = wgpu::BlendFactor::OneMinusSrc;
                 break;
             case BlendPreset::Multiply:
-                // s*d + d*(1-a). The second term is what keeps transparent parts of the
-                // layer from multiplying the backdrop down to black.
+                // s*d + d*(1-a); the second term stops transparent parts of the layer
+                // multiplying the backdrop to black.
                 blend.color.srcFactor = wgpu::BlendFactor::Dst;
                 blend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
                 break;
@@ -467,9 +462,9 @@ public:
                 blend.color.dstFactor = wgpu::BlendFactor::One;
                 break;
             case BlendPreset::Darken:
-                // Min against a premultiplied source means a transparent area is 0 and
-                // would darken everything to black, so this one is only correct where the
-                // layer is opaque. Same caveat AE carries.
+                // Min against premultiplied source treats transparent areas as 0,
+                // darkening to black — only correct where the layer is opaque (same
+                // caveat AE has).
                 blend.color.operation = wgpu::BlendOperation::Min;
                 blend.color.srcFactor = wgpu::BlendFactor::One;
                 blend.color.dstFactor = wgpu::BlendFactor::One;
@@ -498,9 +493,8 @@ public:
     }
 
     ComputePipelineHandle create_compute_pipeline(std::string_view, std::string_view) override {
-        // Deliberately unimplemented. Effects are authored in Slang and the shader
-        // toolchain is not wired yet. Returning null rather than a stub pipeline so a
-        // caller cannot mistake a no-op for a working effect.
+        // Unimplemented — Slang toolchain not wired yet. Null rather than a stub so
+        // callers can't mistake a no-op for a working effect.
         return nullptr;
     }
 
@@ -537,8 +531,8 @@ private:
 }  // namespace
 
 std::unique_ptr<GpuDevice> create_dawn_device() {
-    // Timed waits are opt-in. Without this, WaitAny with a timeout fails outright and
-    // adapter creation silently returns nothing.
+    // Timed waits are opt-in; without this, WaitAny with a timeout fails and adapter
+    // creation silently returns nothing.
     wgpu::InstanceDescriptor instanceDesc{};
     instanceDesc.capabilities.timedWaitAnyEnable = true;
     instanceDesc.capabilities.timedWaitAnyMaxCount = 8;
@@ -583,8 +577,8 @@ std::unique_ptr<GpuDevice> create_dawn_device() {
     deviceDesc.SetDeviceLostCallback(
         wgpu::CallbackMode::AllowSpontaneous,
         [](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message) {
-            // Destroyed fires on every normal shutdown. Only the other reasons mean
-            // something actually went wrong.
+            // Destroyed fires on every normal shutdown; only other reasons indicate
+            // an actual problem.
             if (reason == wgpu::DeviceLostReason::Destroyed) {
                 return;
             }

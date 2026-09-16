@@ -81,15 +81,13 @@ private:
     QString caption_;
 };
 
-// Returns the page; `timecodeOut` receives the label so the viewer's readout can be
-// driven by the timeline instead of sitting at zero forever.
+// Returns the page; timecodeOut receives the label so the timeline can drive it.
 QWidget* makeViewerPage(QLabel** timecodeOut, GpuViewport** viewportOut) {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(16, 16, 16, 0);
     layout->setSpacing(0);
 
-    // The striped placeholder is gone: this is a real swapchain now.
     auto* canvas = new GpuViewport;
     layout->addWidget(canvas, 1);
     if (viewportOut != nullptr) {
@@ -150,9 +148,8 @@ MainWindow::MainWindow(gpu::GpuDevice* device, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // The pool lives in per-user app data, not beside any project, because it outlives
-    // every project. Loaded before the panels are built so the tab is populated the first
-    // time it is shown rather than after the first import.
+    // Pool lives in per-user app data (outlives any project); loaded before panels build
+    // so the tab isn't empty on first show.
     const QString dataDir =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dataDir);
@@ -162,8 +159,7 @@ MainWindow::MainWindow(gpu::GpuDevice* device, QWidget* parent)
     peaksDir_ = dataDir + QStringLiteral("/peaks");
     QDir().mkpath(peaksDir_);
 
-    // TEMPORARY: a demo composition so the timeline has something to draw.
-    // Goes away once the app can open a project file.
+    // TEMPORARY: demo composition until the app can open a project file.
     project_ = demo::sampleProject();
     loadAudio();
 
@@ -176,29 +172,25 @@ MainWindow::MainWindow(gpu::GpuDevice* device, QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
     setFocus();
 
-    // Permanent widget so it sits at the right end and is never overwritten by the
-    // transient messages that come and go on the left.
+    // Permanent widget: stays at the right end, unaffected by transient status messages.
     readout_ = new StatusReadout;
     statusBar()->addPermanentWidget(readout_);
 
     refreshCompositionTabs();
     refreshUndoActions();
     updateStatus();
-    // Title comes from document state, so it has to be set once at launch rather than
-    // only when something changes.
+    // Title derives from document state; set once at launch, not just on change.
     markClean();
 
-    // While playing, report the frame rate we actually achieve rather than the one we
-    // are aiming for. A number that always reads 30 would be useless.
+    // Reports the actual frame rate achieved, not the target; a constant "30" is useless.
     auto* statusTick = new QTimer(this);
     statusTick->setInterval(250);
     connect(statusTick, &QTimer::timeout, this, [this] {
         if (playback_ != nullptr && playback_->playing()) {
             updateStatus();
         }
-        // The cache bar on a timer rather than after every render. Rebuilding a graph per
-        // frame of the work area is cheap but not free, and four times a second is faster
-        // than anyone can watch a bar fill.
+        // Cache bar refreshes on a timer, not per render: rebuilding per frame isn't free,
+        // and 4x/sec is already faster than anyone can watch it fill.
         refreshCacheBar();
         updateReadouts();
     });
@@ -207,9 +199,8 @@ MainWindow::MainWindow(gpu::GpuDevice* device, QWidget* parent)
 
 namespace {
 
-// macOS hides a QMenu that contains no actions, which collapsed the nine-menu bar to
-// three. Menus are populated with their real commands and disabled until the feature
-// behind them exists, which keeps the bar honest and complete.
+// macOS hides a QMenu with no actions; add real, disabled items instead of leaving
+// menus empty so the menu bar doesn't silently collapse.
 void addPending(QMenu* menu, const QStringList& items) {
     for (const QString& item : items) {
         if (item.isEmpty()) {
@@ -224,9 +215,8 @@ void addPending(QMenu* menu, const QStringList& items) {
 }  // namespace
 
 void MainWindow::importMedia() {
-    // Deliberately broad rather than an exhaustive extension list: FFmpeg opens far more
-    // than any list we would maintain, and probe() is the real gate. A filter that
-    // rejects a file FFmpeg can read is just a bug with a nice dialog.
+    // Broad filter, not exhaustive: probe() is the real gate, and FFmpeg reads far more
+    // than any extension list we'd maintain.
     const QStringList paths = QFileDialog::getOpenFileNames(
         this, QStringLiteral("Import Media"), QString(),
         QStringLiteral("Media (*.mp4 *.mov *.mkv *.webm *.avi *.m4v *.wav *.mp3 *.aac "
@@ -255,9 +245,8 @@ void MainWindow::importMedia() {
                           info->duration, info->width, info->height, info->fps,
                           info->hasAudio);
 
-        // Also into the app-level pool. First-seen is stamped here because it cannot be
-        // recovered later: a file's own timestamps say when it was made, not when you
-        // first pulled it into Ruby.
+        // Also added to the app-level pool; firstSeen is stamped now since file timestamps
+        // record creation, not import time.
         io::PooledItem pooled;
         pooled.path = local;
         pooled.name = QFileInfo(path).fileName().toStdString();
@@ -269,8 +258,7 @@ void MainWindow::importMedia() {
             pooledNew = true;
         }
 
-        // Only files that actually carry audio. Asking a silent clip to conform means
-        // decoding the whole thing to discover what probe() already told us.
+        // Only conform files with audio; probe() already knows a silent clip needs no decode.
         if (info->hasAudio) {
             if (conformAudio(path) == media::ConformState::Ready) {
                 ++conformed;
@@ -291,8 +279,7 @@ void MainWindow::importMedia() {
     }
     statusBar()->showMessage(message, 6000);
 
-    // The pool is saved right here rather than at quit. It is a record of things you
-    // did, and a crash three hours later should not be able to erase this morning.
+    // Saved immediately, not at quit: a later crash shouldn't erase this record.
     if (pooledNew) {
         pool_.save(poolPath_.toStdString());
         if (pooledPanel_ != nullptr) {
@@ -310,8 +297,7 @@ core::Composition* MainWindow::activeComposition() {
             return found;
         }
     }
-    // The active comp was deleted, or nothing has been chosen yet. Fall back rather
-    // than leaving every panel pointed at nothing.
+    // Active comp was deleted or unset; fall back rather than pointing panels at nothing.
     if (project_.compositions().empty()) {
         return nullptr;
     }
@@ -355,8 +341,7 @@ void MainWindow::refreshUndoActions() {
 }
 
 void MainWindow::afterDocumentReplaced() {
-    // Undo swaps the whole document, so every pointer any panel is holding is now
-    // dangling. Re-point all of them before anything repaints.
+    // Undo swaps the whole document; re-point every panel's pointers before repaint.
     core::Composition* active = activeComposition();
     projectPanel_->setProject(&project_);
     if (viewport_ != nullptr) {
@@ -414,18 +399,9 @@ core::SizeOf MainWindow::layerSizes() {
                 }
                 return {compW, compH};
             case core::LayerKind::Text: {
-                // The size of the IMAGE the rasteriser will produce, not the size of the
-                // ink inside it.
-                //
-                // This used to union the glyph bounds, which is smaller: the raster pads
-                // by the stroke width plus a couple of pixels so a heavy outline is not
-                // clipped, and the compositor sizes the layer's quad from the image it is
-                // handed. With a 5px stroke the two answers differed by 14px per axis, so
-                // the viewer drew selection handles around a rectangle that was not the
-                // one on screen and every click landed slightly off.
-                //
-                // Measured without rasterising, through the same function the rasteriser
-                // uses, so the padding rule cannot drift between them.
+                // Size of the rasterized IMAGE, not the glyph bounds: the raster pads by
+                // stroke width, and the compositor sizes the quad from that image. Measured
+                // via the same function the rasteriser uses so padding can't drift.
                 const QSizeF size = textLayerSize(layer, 1.0);
                 return {size.width(), size.height()};
             }
@@ -454,8 +430,7 @@ std::vector<core::LayerId> MainWindow::alignableSelection() {
     }
     for (const core::LayerId id : timelinePanel_->selectedLayers()) {
         const core::Layer* layer = comp->find(id);
-        // A locked layer is not alignable for the same reason it is not draggable, and an
-        // audio layer has no picture to line up.
+        // Locked layers aren't draggable, so not alignable; audio has no picture to line up.
         if (layer != nullptr && !layer->locked &&
             layer->kind != core::LayerKind::Audio) {
             out.push_back(id);
@@ -482,17 +457,14 @@ bool MainWindow::nudgeLayerBy(core::Layer& layer, double dx, double dy, double s
     const double compH = static_cast<double>(comp->height);
     const core::TimeContext ctx = comp->timeContext();
 
-    // Position is stored in the PARENT's space, so a distance in composition pixels is not
-    // the number to add to it. Ask the parent chain what that distance is worth: for an
-    // unparented layer this is the identity, and under a parent scaled to 50% it is the
-    // difference between landing on the edge and landing half way there.
+    // Position is stored in the PARENT's space, so a composition-pixel delta must go
+    // through the parent transform first (identity if unparented).
     if (layer.parent.has_value()) {
         if (const core::Layer* owner = comp->find(*layer.parent); owner != nullptr) {
             const core::Transform2D back =
                 core::resolvedTransform(*comp, *owner, seconds, ctx, compW, compH, sizes)
                     .inverse();
-            // The linear part only. A delta is a direction and a distance, not a point, so
-            // the translation must not come along.
+            // Linear part only: a delta is a direction, not a point, so translation drops out.
             const double ux = back.applyX(dx, dy) - back.applyX(0.0, 0.0);
             const double uy = back.applyY(dx, dy) - back.applyY(0.0, 0.0);
             dx = ux;
@@ -506,9 +478,8 @@ bool MainWindow::nudgeLayerBy(core::Layer& layer, double dx, double dy, double s
         return false;
     }
 
-    // An animated Position moves as a whole. Aligning is a statement about where the layer
-    // sits, and setting one key at the playhead would align this frame by breaking every
-    // other one: the move you asked for plus a move you did not.
+    // Shifts every keyframe, not just the one at the playhead: aligning one frame would
+    // silently move every other one out of place.
     const auto shift = [px, py](core::Property& prop) {
         if (prop.animated()) {
             for (core::Keyframe& k : prop.keys) {
@@ -520,11 +491,9 @@ bool MainWindow::nudgeLayerBy(core::Layer& layer, double dx, double dy, double s
         }
     };
 
-    // Tried on a copy first, because writing to Position does not always move the layer.
-    // An expression returning an absolute value ignores what is underneath it, so the
-    // layer would stay put while the file was marked dirty and an undo entry appeared for
-    // a move that never happened. Rather than special-casing expressions, ask the only
-    // question that matters: does the box end up somewhere else?
+    // Tried on a copy first: an expression can ignore Position entirely, so writing to it
+    // doesn't guarantee movement. Check whether the box actually moved instead of
+    // special-casing expressions.
     const core::Bounds before =
         core::layerBounds(*comp, layer, seconds, ctx, compW, compH, sizes);
     core::Layer trial = layer;
@@ -578,9 +547,7 @@ void MainWindow::alignSelectedLayer(AlignPanel::Align edge, AlignPanel::Target t
         }
     }
 
-    // One undo step for the gesture, recorded before anything moves and dropped again if
-    // nothing did. Aligning four layers and pressing undo four times is an undo stack that
-    // remembers the implementation rather than the act.
+    // One undo step for the whole gesture, not one per layer moved.
     recordEdit(QStringLiteral("Align Layers"));
     bool movedAny = false;
 
@@ -619,11 +586,8 @@ void MainWindow::alignSelectedLayer(AlignPanel::Align edge, AlignPanel::Target t
     markDirty();
 }
 
-// Even gaps between the outermost two, which stay put.
-//
-// Sorted by where the layers actually are, not by their order in the stack. "Spread these
-// out" is a statement about the picture, and a layer's position in the layer list has
-// nothing to do with where it sits on screen.
+// Even gaps between the outermost two (which stay put); sorted by on-screen position,
+// not layer-list order.
 void MainWindow::distributeSelectedLayers(AlignPanel::Align axis) {
     core::Composition* comp = activeComposition();
     const std::vector<core::LayerId> ids = alignableSelection();
@@ -640,8 +604,7 @@ void MainWindow::distributeSelectedLayers(AlignPanel::Align axis) {
                           axis == AlignPanel::Align::VCenter ||
                           axis == AlignPanel::Align::Bottom;
 
-    // The point on each layer the spacing is measured from: its near edge, its centre, or
-    // its far edge, which is what makes the six buttons six different answers.
+    // Anchor point per axis-mode: near edge, center, or far edge.
     const auto anchorOf = [&](const core::Bounds& b) {
         switch (axis) {
             case AlignPanel::Align::Left:    return b.left;
@@ -680,8 +643,7 @@ void MainWindow::distributeSelectedLayers(AlignPanel::Align axis) {
     recordEdit(QStringLiteral("Distribute Layers"));
     bool movedAny = false;
 
-    // The ends do not move. They define the span, and moving them would mean the result
-    // depends on which of them you think of as fixed.
+    // Ends stay fixed; they define the span being distributed across.
     for (std::size_t i = 1; i + 1 < placed.size(); ++i) {
         const double want = first + step * static_cast<double>(i);
         const double delta = want - placed[i].anchor;
@@ -710,9 +672,7 @@ core::Layer* MainWindow::selectedLayer() {
     return id.has_value() ? comp->find(*id) : nullptr;
 }
 
-// `[` and `]` MOVE the layer so an edge lands on the playhead. Option makes the same
-// key TRIM instead. Move and trim are different intentions, and one key with a modifier
-// is why people do both without thinking about it.
+// `[`/`]` move the layer so an edge lands on the playhead; Option+key trims instead.
 void MainWindow::nudgeLayerEdge(bool inPoint, bool trim) {
     core::Composition* comp = activeComposition();
     core::Layer* layer = selectedLayer();
@@ -728,8 +688,7 @@ void MainWindow::nudgeLayerEdge(bool inPoint, bool trim) {
     recordEdit(trim ? QStringLiteral("Trim Layer") : QStringLiteral("Move Layer"));
 
     if (trim) {
-        // A trim that would invert or collapse the layer is refused rather than clamped
-        // to nothing: a zero-length bar cannot be grabbed again.
+        // Refused, not clamped: a zero-length bar can't be grabbed again.
         if (inPoint) {
             if (t >= out - minimum) {
                 return;
@@ -748,17 +707,14 @@ void MainWindow::nudgeLayerEdge(bool inPoint, bool trim) {
         layer->outPoint = core::TimeValue::seconds(newIn + length);
     }
 
-    // Nudging a layer past the end extends the composition to meet it. A keyboard edit
-    // is a single discrete step rather than a continuous gesture, so unlike a drag there
-    // is nothing to wait for: grow now.
+    // Growing past the end extends the composition immediately: unlike a drag, a
+    // keyboard nudge is a single discrete step with nothing to wait for.
     const bool grew = comp->growToFit();
 
     timelinePanel_->setComposition(comp);
     if (viewport_ != nullptr) {
         viewport_->update();
     }
-    // Nudging and trimming never marked the project dirty, so the title never showed a
-    // change and closing would not have warned about unsaved work.
     markDirty();
     if (grew) {
         noteCompositionGrew();
@@ -785,9 +741,8 @@ void MainWindow::splitLayerAtPlayhead() {
 
     recordEdit(QStringLiteral("Split Layer"));
 
-    // The second half is a full copy: same media, effects and keyframes. Keyframes are
-    // kept in both halves rather than divided, which is what AE does and what lets you
-    // undo a split by trimming rather than by re-animating.
+    // Tail is a full copy (media, effects, keyframes); keyframes are kept in both
+    // halves, matching AE, so a split can be undone by trimming rather than re-animating.
     core::Layer tail = *layer;
     tail.id = comp->nextLayerId();
     tail.inPoint = core::TimeValue::seconds(t);
@@ -806,7 +761,6 @@ void MainWindow::splitLayerAtPlayhead() {
     if (viewport_ != nullptr) {
         viewport_->update();
     }
-    // Two layers now where there was one, each with new in and out points.
     markDirty();
 }
 
@@ -820,6 +774,15 @@ void MainWindow::toggleSelectedLayerProperties() {
     }
     timelinePanel_->revealAnimated(layer->id);
     markDirty();
+}
+
+// L: reveal the Audio Level property. A no-op on a layer with no audio.
+void MainWindow::revealSelectedLayerAudioLevel() {
+    core::Layer* layer = selectedLayer();
+    if (layer == nullptr || timelinePanel_ == nullptr) {
+        return;
+    }
+    timelinePanel_->revealAudioLevel(layer->id);
 }
 
 // J and K walk the keyframes of the selected layer, including the ones on its effects.
@@ -867,8 +830,8 @@ void MainWindow::newProject() {
     history_.clear();
     projectPath_.clear();
     activeComp_ = 0;
-    // Silence the mixer BEFORE dropping the buffers it points into. The audio thread is
-    // running right now and does not know the project is going away.
+    // Silence the mixer BEFORE dropping buffers; the audio thread doesn't know the
+    // project is going away.
     if (audioOut_ != nullptr) {
         audioOut_->stop();
         audioOut_->setSources({});
@@ -880,8 +843,7 @@ void MainWindow::newProject() {
     }
     rhythmNote_.clear();
 
-    // A project with no composition is a legal but useless state, so make one rather
-    // than dropping the user into an app where nothing works until they find a menu.
+    // Always create one composition; an empty project leaves nothing to work on.
     core::Composition& comp =
         project_.addComposition("Comp 1", 1080, 1920, 30.0, 15.0);
     setActiveComposition(comp.id);
@@ -902,8 +864,7 @@ void MainWindow::openProject() {
     openProject(path);
 }
 
-// The same open, with the file already chosen. Needed by the command line, and it is what
-// double-clicking a .rbypr in the Finder will want too.
+// Same as openProject(), with the file already chosen (command line, Finder double-click).
 void MainWindow::openProject(const QString& path) {
     core::Project loaded;
     const io::LoadReport report = io::load(loaded, path.toStdString());
@@ -913,19 +874,13 @@ void MainWindow::openProject(const QString& path) {
         return;
     }
 
-    // Bring the loaded document onto the current schemas.
-    //
-    // Ranges live in the schema, not the file, so a freshly loaded project arrives with
-    // default ones until they are put back. Effects go further: an effect authored at an
-    // older schema version runs its migration chain here, which is the only place it can.
-    //
-    // Every note goes into the same list the loader already uses, so a migrated project
-    // says what changed in the same dialog that reports a missing media link. A project
-    // that quietly reinterprets your work is worse than one that tells you.
+    // Migrates the loaded document onto current schemas: ranges get put back, effects run
+    // their migration chain. Notes feed into the same report as missing-media warnings.
     std::vector<std::string> migrationNotes;
     for (core::Composition& comp : loaded.compositions()) {
         for (core::Layer& layer : comp.layers) {
             core::adoptTransformRanges(layer);
+            core::ensureAudioLevel(layer);
             for (core::EffectInstance& fx : layer.effects) {
                 engine::EffectRegistry::MigrationReport r =
                     engine::EffectRegistry::instance().migrate(fx);
@@ -962,8 +917,7 @@ void MainWindow::openProject(const QString& path) {
     refreshCompositionTabs();
     markClean();
 
-    // Anything the loader had to repair is said out loud. A project that quietly opens
-    // missing a link is worse than one that tells you which link it lost.
+    // Anything the loader repaired is reported, rather than silently opening incomplete.
     std::vector<std::string> allNotes = report.notes;
     for (std::string& note : migrationNotes) {
         allNotes.push_back(std::move(note));
@@ -1033,16 +987,8 @@ void MainWindow::markDirty() {
         updateTitle();
     }
 
-    // Republishing the mix hangs off here rather than being remembered at each edit site.
-    //
-    // Nine places were calling rebuildMix by hand and I still could not account for a
-    // report of audio outliving a deleted clip. When you cannot enumerate the writers,
-    // the answer is to stop enumerating them: every edit already marks the document
-    // dirty, so every edit now also refreshes what is audible. It is cheap, it runs once
-    // per edit rather than per frame, and it cannot be forgotten by the next feature.
-    //
-    // Note this is outside the `if`: the dirty flag only flips once, but the mix has to
-    // follow every edit after that one too.
+    // Hooked here instead of at each edit site, so no editor can forget to refresh audio.
+    // Outside the `if`: dirty only flips once, but the mix must follow every edit after.
     rebuildMix();
 }
 
@@ -1090,11 +1036,8 @@ void MainWindow::newComposition() {
                              6000);
 }
 
-// The only way a composition ever gets shorter.
-//
-// Duration grows by itself whenever a layer runs past the end and never shrinks by
-// itself, so everything that empties out the tail of a comp ends up here. Deliberately
-// so: growing hides nothing, shrinking hides content.
+// The only way a composition gets shorter: duration grows automatically but never
+// shrinks on its own, so shrinking always goes through here explicitly.
 void MainWindow::compositionSettings() {
     core::Composition* comp = activeComposition();
     if (comp == nullptr) {
@@ -1125,9 +1068,8 @@ void MainWindow::compositionSettings() {
     comp->height = s.height;
     comp->fps = s.fps;
 
-    // Layers are NOT trimmed to a shorter duration. They keep their out points and hang
-    // over the end, which is the same state a long clip lands in when it is dropped.
-    // Cutting them here would destroy work to tidy up a number.
+    // Layers are NOT trimmed to fit; they hang over the end rather than lose work to
+    // tidy up a number.
     comp->duration = s.duration;
 
     if (timelinePanel_ != nullptr) {
@@ -1154,10 +1096,8 @@ void MainWindow::compositionSettings() {
                              6000);
 }
 
-// Growth changes the composition's duration, which is not a cosmetic fact: the transport
-// loops on it, so without this the comp would get longer while playback kept turning over
-// at the old end. Every bar on the timeline also rescales at once, which looks like a
-// rendering fault unless something says what happened.
+// Duration isn't cosmetic: the transport loops on it, and every bar rescales at once,
+// which looks like a rendering fault unless announced.
 void MainWindow::noteCompositionGrew() {
     core::Composition* comp = activeComposition();
     if (comp == nullptr) {
@@ -1187,16 +1127,14 @@ void MainWindow::removeSelectedLayer(const QString& undoLabel) {
     if (comp == nullptr || timelinePanel_ == nullptr) {
         return;
     }
-    // Everything selected, not just the primary. Selecting three layers and pressing
-    // Delete has exactly one reasonable outcome and it is not "one of them".
+    // Removes every selected layer, not just the primary one.
     const std::vector<core::LayerId> going = timelinePanel_->selectedLayers();
     if (going.empty()) {
         return;
     }
 
-    // Work out what to select next BEFORE removing anything, while the indices still mean
-    // something. The layer that slides up into the topmost deleted slot is the natural
-    // next choice, and the one above it when the bottom of the stack just went.
+    // Computed before removal, while indices still apply: selects the layer that slides
+    // into the topmost deleted slot.
     std::size_t index = comp->layers.size();
     for (const core::LayerId id : going) {
         const auto at = std::find_if(comp->layers.begin(), comp->layers.end(),
@@ -1208,8 +1146,7 @@ void MainWindow::removeSelectedLayer(const QString& undoLabel) {
         }
     }
 
-    // One undo step for the whole gesture. Deleting four layers and having to press undo
-    // four times is an undo stack that remembers the implementation rather than the act.
+    // One undo step for the whole gesture, not one per layer.
     recordEdit(undoLabel);
     bool removedAny = false;
     for (const core::LayerId id : going) {
@@ -1219,8 +1156,7 @@ void MainWindow::removeSelectedLayer(const QString& undoLabel) {
         return;
     }
 
-    // The composition does NOT shrink back. Deleting the layer that stretched it leaves
-    // the duration where it is, same as every other way duration is treated.
+    // Duration does NOT shrink back when the layer that stretched it is deleted.
     if (timelinePanel_ != nullptr) {
         timelinePanel_->setComposition(comp);
         if (comp->layers.empty()) {
@@ -1279,10 +1215,8 @@ void MainWindow::pasteLayer() {
     core::Layer copy = *clipboard_;
     copy.id = comp->nextLayerId();
 
-    // Parenting is by layer id, which only means anything inside one composition. Paste
-    // into the SAME comp and the link is still good, so it is kept; paste into a
-    // different one and that id is either nothing or, worse, somebody else's layer.
-    // Clearing it unconditionally used to throw away a valid link on every paste.
+    // Layer ids only mean something within one composition: keep the parent link when
+    // pasting into the same comp, drop it otherwise since the id may belong to someone else.
     if (copy.parent.has_value() && comp->find(*copy.parent) == nullptr) {
         copy.parent.reset();
     }
@@ -1329,18 +1263,12 @@ void MainWindow::duplicateLayer() {
         }
         core::Layer copy = *layer;
         copy.id = comp->nextLayerId();
-        // The parent is KEPT. A duplicate is always in the same composition, so the link
-        // is still valid, and a copy of a parented layer that quietly loses its parent is
-        // a copy that behaves differently from the thing it copied.
-        //
-        // Note this means duplicating a parent AND its child gives you a copied child
-        // still following the ORIGINAL parent. Right for one layer, arguably wrong for a
-        // whole hierarchy, and rewiring copies to point at each other is its own decision
-        // rather than something to slip in here.
+        // Parent is KEPT: duplicating stays in the same comp, so the link is still valid.
+        // Note: duplicating a parent+child pair leaves the copied child following the
+        // ORIGINAL parent, not the copy.
         copy.locked = false;  // a copy you cannot touch is not a useful copy
 
-        // Directly above the original, not on top of the stack. A duplicate that jumps to
-        // the top of a twenty layer comp is a duplicate you then have to go and find.
+        // Inserted directly above the original, not atop the whole stack.
         const auto at = std::find_if(comp->layers.begin(), comp->layers.end(),
                                      [id](const core::Layer& l) { return l.id == id; });
         made = copy.id;
@@ -1364,9 +1292,7 @@ void MainWindow::duplicateLayer() {
     markDirty();
 }
 
-// Built from the menu bar's own QActions rather than fresh ones. Duplicating them here
-// would mean two places to update, two shortcut strings to keep in step, and eventually a
-// context menu that does something subtly different from the menu it copies.
+// Reuses the menu bar's own QActions rather than fresh ones, so shortcuts can't drift.
 void MainWindow::showLayerContextMenu(const QPoint& globalPos) {
     const bool hasLayer = selectedLayer() != nullptr;
     cutAction_->setEnabled(hasLayer);
@@ -1387,9 +1313,8 @@ void MainWindow::showLayerContextMenu(const QPoint& globalPos) {
     menu.addAction(deleteAction_);
     menu.exec(globalPos);
 
-    // Hand them back. These are the menu bar's actions, and leaving one disabled because
-    // of what happened to be selected during a right click would silently break the Edit
-    // menu until the next right click put it back.
+    // Restored: these are the menu bar's own actions, and leaving one disabled would
+    // silently break the Edit menu until the next right-click.
     cutAction_->setEnabled(true);
     copyAction_->setEnabled(true);
     pasteAction_->setEnabled(true);
@@ -1418,9 +1343,7 @@ void MainWindow::applyEffect(const std::string& effectId) {
     recordEdit(QStringLiteral("Apply %1")
                    .arg(QString::fromStdString(def->schema.display_name)));
 
-    // Effects apply in order, top to bottom, so a new one goes on the END of each stack:
-    // it acts on the result of everything already there, which is what "apply an effect
-    // to this layer" means when the layer already has some.
+    // New effect goes on the END of the stack, acting on the result of what's above it.
     for (const core::LayerId id : targets) {
         core::Layer* target = comp->find(id);
         if (target == nullptr || target->locked) {
@@ -1428,8 +1351,7 @@ void MainWindow::applyEffect(const std::string& effectId) {
         }
         target->effects.push_back(registry.instantiate(effectId));
 
-        // Twirled open, so what was just added is visible rather than hidden behind an
-        // arrow you have to know to click.
+        // Twirled open so the new effect is visible immediately.
         target->expanded = true;
     }
 
@@ -1496,21 +1418,16 @@ void MainWindow::removeEffect(int index) {
     markDirty();
 }
 
-// Beat Analyzer. Two lanes, and the choice is the user's rather than something guessed
-// at, because the two are not two settings of one thing.
-//
-// A beat grid is periodic and quantisable; vocal onsets are an aperiodic list where "snap
-// to the half beat" is meaningless. Measured on a real edit, cuts landed on syllables at
-// 29ms median while a fitted beat grid matched the audio worse than a random offset. Which
-// one a track wants is a fact about the music, and only the person listening to it knows.
+// User picks the lane rather than guessing: beat grids are periodic/quantizable, vocal
+// onsets are not, and which one fits a track is a fact about the music, not something
+// to infer.
 void MainWindow::runBeatAnalyzer() {
     core::Composition* comp = activeComposition();
     if (comp == nullptr) {
         return;
     }
 
-    // The track to analyse: the first layer that is an audio layer and decoded. The same
-    // rule loadAudio uses to pick a rhythm source, so the two cannot disagree.
+    // First decoded audio layer, same rule loadAudio uses, so the two can't disagree.
     const media::AudioBuffer* track = nullptr;
     for (const core::Layer& layer : comp->layers) {
         if (layer.kind != core::LayerKind::Audio || !layer.media.has_value()) {
@@ -1529,8 +1446,7 @@ void MainWindow::runBeatAnalyzer() {
 
     auto detector = beat::createDetector();
     if (detector == nullptr || !detector->available()) {
-        // Says so plainly rather than running and finding nothing, which would look like
-        // the track had no beats in it.
+        // Says so plainly, rather than silently finding nothing.
         QMessageBox::information(
             this, QStringLiteral("Beat Analyzer"),
             QStringLiteral("This build has no rhythm analysis.\n\n%1")
@@ -1575,8 +1491,7 @@ void MainWindow::runBeatAnalyzer() {
     recordEdit(QStringLiteral("Analyse Audio"));
     const beat::Result result = detector->analyze(*track, lane);
 
-    // setLane preserves markers the user placed by hand, which is the whole point of the
-    // lanes being separate: re-analysing must not throw away someone's corrections.
+    // setLane preserves hand-placed markers; re-analysing must not discard corrections.
     comp->rhythm.setLane(lane == beat::Lane::Vocal ? core::MarkerLane::Vocal
                                                    : core::MarkerLane::Beat,
                          result.markers);
@@ -1593,10 +1508,8 @@ void MainWindow::runBeatAnalyzer() {
     statusBar()->showMessage(rhythmNote_, 5000);
 }
 
-// A composition that matches a clip: its size, its frame rate, its length, its name.
-//
-// The dialog route makes you read those four numbers off the clip and type them back in,
-// which is a transcription exercise the app can do perfectly and a person cannot.
+// Composition matching a clip's size/fps/length/name, instead of making the user
+// transcribe those numbers into the New Composition dialog by hand.
 void MainWindow::compositionFromMedia(core::MediaId media) {
     const core::MediaItem* item = project_.findMedia(media);
     if (item == nullptr) {
@@ -1605,8 +1518,7 @@ void MainWindow::compositionFromMedia(core::MediaId media) {
     recordEdit(QStringLiteral("New Composition from %1")
                    .arg(QString::fromStdString(item->name)));
 
-    // Audio has no frame to match, so it falls back to the composition defaults rather
-    // than making a 0x0 comp. Its duration is still worth taking.
+    // Audio has no frame size; falls back to defaults rather than a 0x0 comp.
     const int width = item->width > 0 ? item->width : 1080;
     const int height = item->height > 0 ? item->height : 1920;
     const double fps = item->fps > 0.0 ? item->fps : 30.0;
@@ -1633,9 +1545,8 @@ void MainWindow::compositionFromMedia(core::MediaId media) {
 
 void MainWindow::deleteProjectItem(bool isComposition, std::uint64_t id) {
     if (isComposition) {
-        // Deleting a composition is a bigger question than this footer button should
-        // answer on its own: it may be nested inside another one, and there is no
-        // precomp-reference cleanup yet. Refused out loud rather than half-done.
+        // Refused rather than half-done: may be nested in another comp, and precomp-
+        // reference cleanup doesn't exist yet.
         statusBar()->showMessage(
             QStringLiteral("Deleting compositions is not supported yet"), 4000);
         return;
@@ -1647,8 +1558,7 @@ void MainWindow::deleteProjectItem(bool isComposition, std::uint64_t id) {
     }
     const std::size_t used = project_.usageCount(media);
 
-    // Asked before, not reported after. Removing a clip that six layers depend on is a
-    // thing you want to know about while you can still say no.
+    // Confirmed before removal, not reported after, while the user can still say no.
     if (used > 0) {
         const auto answer = QMessageBox::question(
             this, QStringLiteral("Remove media"),
@@ -1713,19 +1623,14 @@ void MainWindow::deselectAll() {
     }
 }
 
-// Conform: decode once, summarise into a peak pyramid, write it to the cache.
-//
-// This is the same move AE makes with its .cfa files, Olive with its PCM conform, and
-// Kdenlive with its levels file. All three arrived at it for the same reason: decoding on
-// demand cannot keep up with scrubbing a timeline. Doing it at import means paying once,
-// at the moment the user already expects the app to be busy with this file.
+// Conform: decode once, summarise into a peak pyramid, cache it. Same approach AE/
+// Olive/Kdenlive use, since on-demand decode can't keep up with scrubbing.
 media::ConformState MainWindow::conformAudio(const QString& path) {
     const std::string local = path.toStdString();
     const std::string cache = media::peakCachePath(peaksDir_.toStdString(), local);
 
-    // A hit means this exact file, at this exact size and modification time, has already
-    // been summarised. Re-export the clip under the same name and the key changes, so the
-    // stale peaks are never served.
+    // Keyed on path+size+mtime, so a re-exported file under the same name never serves
+    // stale peaks.
     media::PeakPyramid pyramid;
     if (pyramid.load(cache)) {
         return media::ConformState::Ready;
@@ -1740,16 +1645,15 @@ media::ConformState MainWindow::conformAudio(const QString& path) {
     if (pyramid.empty()) {
         return media::ConformState::Failed;
     }
-    // A cache that fails to write is not a failure to conform: the peaks are in hand and
-    // usable, we just have to do this again next launch.
+    // A failed cache write isn't a conform failure; peaks are usable now, just re-done
+    // next launch.
     pyramid.save(cache);
     return media::ConformState::Ready;
 }
 
 // --- Layer > New -------------------------------------------------------------
 
-// Everything a newly created layer has in common, so solid and null cannot drift apart in
-// where they land, how long they are, or whether they are undoable.
+// Shared setup for new layers, so solid/null/etc. can't drift in placement or undo.
 core::Layer* MainWindow::createLayer(const QString& undoLabel, const std::string& name,
                                      core::LayerKind kind) {
     core::Composition* comp = activeComposition();
@@ -1762,14 +1666,11 @@ core::Layer* MainWindow::createLayer(const QString& undoLabel, const std::string
     recordEdit(undoLabel);
 
     core::Layer& layer = project_.addLayer(*comp, name, kind);
-    // A created layer spans the whole composition. It has no source to take a length
-    // from, and a new layer you have to trim open before you can see it is a new layer
-    // that looks broken.
+    // Spans the whole composition; no source to derive a length from.
     layer.inPoint = core::TimeValue::seconds(0.0);
     layer.outPoint = core::TimeValue::seconds(comp->duration);
 
-    // addLayer puts it on top; move it above whatever was selected instead. In a stack of
-    // twenty, "on top" means "somewhere you now have to go and find".
+    // addLayer puts it on top; move it above the selection instead so it's easy to find.
     const core::LayerId made = layer.id;
     if (const auto selected = timelinePanel_ != nullptr ? timelinePanel_->selectedLayer()
                                                         : std::nullopt;
@@ -1821,8 +1722,8 @@ void MainWindow::newSolidLayer() {
     if (layer == nullptr) {
         return;
     }
-    // Straight through as 0-1, no gamma conversion: the compositor works in linear light
-    // and a colour picked on screen is what the user meant to see.
+    // No gamma conversion: compositor works in linear light, matching what was picked
+    // on screen.
     layer->solidColor = core::Value::rgba(
         static_cast<double>(s.color.redF()), static_cast<double>(s.color.greenF()),
         static_cast<double>(s.color.blueF()), 1.0);
@@ -1878,8 +1779,7 @@ void MainWindow::newTextLayer() {
     }
     const NewTextDialog::Settings s = dialog.settings();
 
-    // The layer is named after what it says. A timeline of layers called "Text 1" through
-    // "Text 9" tells you nothing; one called "DROP 09.12" tells you everything.
+    // Named after its text content, not a generic "Text N".
     QString name = s.text.split(QLatin1Char('\n')).first().trimmed();
     if (name.isEmpty()) {
         name = QStringLiteral("Text");
@@ -1935,10 +1835,8 @@ void MainWindow::setActiveComposition(core::CompId id) {
     }
     activeComp_ = id;
 
-    // Everything that shows a composition has to be told, or a panel keeps rendering
-    // the old one and looks broken in a way that is very hard to diagnose.
-    // The decode cache is kept: it is keyed by media, not by composition, and the other
-    // comp's clips are very likely the same clips. loadAudio republishes the mix.
+    // Every panel showing a composition must be re-told, or it keeps rendering the old
+    // one. Decode cache is kept (keyed by media, not comp); loadAudio republishes the mix.
     rhythmNote_.clear();
     loadAudio();
 
@@ -1972,15 +1870,8 @@ void MainWindow::refreshCompositionTabs() {
     }
     timelineTabs_->setTabs(names);
 
-    // The viewer's tab names the composition it is showing. RENAMED, not replaced.
-    //
-    // This used to call setTabs with all three viewer labels, which was fine while tabs
-    // could not move and wrong the moment they could: dragging Footage out of the viewer
-    // and then switching compositions put the label back with no page behind it, so the
-    // tab existed in two places at once and one of them did nothing.
-    //
-    // The composition page is found wherever it now lives rather than assumed to still be
-    // in the viewer, because that is exactly the assumption that broke.
+    // Viewer tab is RENAMED, not replaced. Found wherever the page now lives rather than
+    // assumed to still be in the viewer, since tabs can move between panels.
     if (viewerPage_ != nullptr) {
         int index = -1;
         if (PanelFrame* home = PanelFrame::frameHolding(viewerPage_, &index);
@@ -2008,14 +1899,8 @@ void MainWindow::dropMediaIntoComposition(core::MediaId id, double seconds,
                                                            : core::LayerKind::Audio);
     layer.media = id;
 
-    // The drop position is the clip's start, not its centre: you drop where you want it
-    // to begin.
-    //
-    // The layer keeps its SOURCE length even when that runs past the end of the
-    // composition. Clamping it there silently threw away footage: drop a 9.8s clip at
-    // 8.6s in a 12s comp and you got a 3.4s layer with no indication anything had been
-    // cut. A bar running off the right edge is honest and is what AE does; the comp
-    // simply does not render past its own end, and you can extend it or trim by hand.
+    // Drop position is the clip's start, not center. Layer keeps its SOURCE length even
+    // past the composition end (as AE does); clamping would silently discard footage.
     const double start = std::max(0.0, seconds);
     const double length = item->duration > 0.0 ? item->duration : comp->duration;
     layer.inPoint = core::TimeValue::seconds(start);
@@ -2052,8 +1937,7 @@ void MainWindow::dropMediaIntoComposition(core::MediaId id, double seconds,
     updateStatus();
     markDirty();
 
-    // Last, so it wins the status bar. "Added clip.mov" is the less useful of the two
-    // messages when the whole timeline just rescaled underneath you.
+    // Shown last, so it wins the status bar over the less useful "Added clip.mov".
     if (grew) {
         noteCompositionGrew();
     }
@@ -2079,9 +1963,7 @@ void MainWindow::addMediaToComposition(core::MediaId id) {
     core::Layer& layer = project_.addLayer(comp, item->name, kind);
     layer.media = id;
 
-    // A clip enters at the start and runs for its own full length, even if that is
-    // longer than the composition. Trimming is the user's job, and truncating on import
-    // hides how much footage there actually is.
+    // Enters at start, full source length even past the comp end; trimming is manual.
     layer.inPoint = core::TimeValue::seconds(0.0);
     layer.outPoint = core::TimeValue::seconds(
         item->duration > 0.0 ? item->duration : comp.duration);
@@ -2128,9 +2010,8 @@ void MainWindow::rebuildMix() {
     }
     const core::TimeContext ctx = comp->timeContext();
 
-    // Solo applies to sound too, and separately from the picture: soloing a music track
-    // should let you hear it alone without also blanking the frame. So this asks whether
-    // any AUDIBLE layer is soloed, not whether any layer is.
+    // Solo applies to sound independently of picture: check whether any AUDIBLE layer
+    // is soloed, not any layer.
     bool anySolo = false;
     for (const core::Layer& layer : comp->layers) {
         if (layer.solo && layer.media.has_value() &&
@@ -2139,6 +2020,8 @@ void MainWindow::rebuildMix() {
             break;
         }
     }
+
+    const double now = playback_ != nullptr ? playback_->time() : 0.0;
 
     std::vector<audio::AudioSource> sources;
     for (const core::Layer& layer : comp->layers) {
@@ -2157,17 +2040,19 @@ void MainWindow::rebuildMix() {
         source.startSeconds = to_seconds(layer.inPoint, ctx);
         source.endSeconds = to_seconds(layer.outPoint, ctx);
         source.sourceOffset = 0.0;
+        // Stored as linear gain already, so this needs no conversion — the inspector
+        // does the dB round trip, not the mixer.
+        if (const core::Property* level = layer.find(core::kAudioLevelKey);
+            level != nullptr) {
+            source.gain = static_cast<float>(level->evaluate(now, ctx).x());
+        }
         sources.push_back(source);
     }
     audioOut_->setSources(sources);
 }
 
-// Rebuilds the mix from the active composition.
-//
-// Every layer whose media carries audio is a source, video included. The old version only
-// looked at LayerKind::Audio, which meant an imported .mov was silent: the normal case for
-// this app, and silent for no better reason than a filter on the wrong field. Whether a
-// layer makes sound is a fact about its media, not about how the layer is classified.
+// Every layer whose media carries audio is a source, video included: audibility is a
+// fact about the media, not the layer's kind.
 void MainWindow::loadAudio() {
     core::Composition* active = activeComposition();
     if (active == nullptr) {
@@ -2191,8 +2076,7 @@ void MainWindow::loadAudio() {
             continue;
         }
 
-        // Decode once per media item, not once per layer. Two layers cutting the same
-        // clip share one buffer.
+        // Decoded once per media item; layers cutting the same clip share the buffer.
         auto found = audio_.find(*layer.media);
         if (found == audio_.end()) {
             auto decoded = media::AudioDecoder::decode(path);
@@ -2203,8 +2087,7 @@ void MainWindow::loadAudio() {
         }
         const media::AudioBuffer& buffer = found->second;
 
-        // Peaks for drawing. Try the conform cache written at import first; only build
-        // them if that misses, which is the whole reason the cache exists.
+        // Peaks for drawing: try the conform cache first, build only on a miss.
         if (peaks_.find(*layer.media) == peaks_.end()) {
             media::PeakPyramid pyramid;
             if (!pyramid.load(media::peakCachePath(peaksDir_.toStdString(), path))) {
@@ -2227,12 +2110,8 @@ void MainWindow::loadAudio() {
     }
     rebuildMix();
 
-    // Rhythm analysis still runs on a dedicated audio layer rather than the mix. Cutting
-    // to the music means cutting to the music, not to the music plus whatever dialogue
-    // happens to be over it.
-    // Only when the track it would analyse has actually changed. This used to run on
-    // every call, which was survivable while loadAudio ran on composition switches and
-    // would not be now that layer edits reach it.
+    // Runs on a dedicated audio layer, not the mix: cutting to music shouldn't cut to
+    // music-plus-dialogue. Only re-runs when the analyzed track actually changed.
     if (rhythmSource != nullptr && analyzedRhythmFor_ != rhythmMedia) {
         analyzedRhythmFor_ = rhythmMedia;
         auto detector = beat::createDetector();
@@ -2275,9 +2154,6 @@ void MainWindow::updateReadouts() {
     }
     std::vector<StatusReadout::Item> items;
 
-    // The real number. This line read "RAM cached 0-12s" as a hardcoded string for
-    // months: it had never measured anything and there was nothing behind it to measure.
-    // There is now.
     if (viewport_ != nullptr && activeComposition() != nullptr) {
         const engine::FrameCache::Stats s = viewport_->cacheStats();
         const double mb = static_cast<double>(s.bytes) / (1024.0 * 1024.0);
@@ -2291,12 +2167,8 @@ void MainWindow::updateReadouts() {
     readout_->setItems(std::move(items));
 }
 
-// Recomputed from the cache after every render, and handed to the timeline as spans.
-//
-// Frames are coalesced into runs here rather than in the painter, because the bar wants
-// "this stretch is ready" and the cache answers "this frame is ready". Turning three
-// hundred adjacent frames into one rectangle is the difference between a strip you can
-// read and a picket fence.
+// Coalesces individual cached frames into runs here (not in the painter), since the
+// bar wants "this stretch is ready", not one rectangle per frame.
 void MainWindow::refreshCacheBar() {
     if (timelinePanel_ == nullptr || viewport_ == nullptr) {
         return;
@@ -2364,8 +2236,7 @@ void MainWindow::buildMenus() {
     deleteAction_ = edit->addAction(QStringLiteral("Delete"), QKeySequence::Delete, this,
                                     &MainWindow::deleteLayer);
     edit->addSeparator();
-    // Select All stays pending: selection is one layer at a time, so it has nothing to
-    // mean yet. It needs multi-layer selection, which is its own piece of work.
+    // Select All stays pending until multi-layer selection exists.
     addPending(edit, {QStringLiteral("Select All")});
     edit->addAction(QStringLiteral("Deselect All"),
                     QKeySequence(QStringLiteral("Ctrl+Shift+A")), this,
@@ -2422,13 +2293,8 @@ void MainWindow::buildMenus() {
                        QString(), QStringLiteral("Time Remap"),
                        QStringLiteral("Retime with Optical Flow...")});
 
-    // Built from the registry, not written out by hand.
-    //
-    // The old menu listed eight categories that were all greyed out and did not
-    // correspond to anything: there was no way to apply an effect at all, so the effect
-    // rows in the timeline and the effect stack in the inspector were both drawing
-    // something you could not create. Generating it means the menu cannot claim an effect
-    // exists that does not, and a new effect appears here the moment it is registered.
+    // Built from the registry, not hand-written, so the menu can't claim an effect that
+    // doesn't exist.
     auto* effect = menuBar()->addMenu(QStringLiteral("Effect"));
     {
         std::map<QString, QMenu*> categories;
@@ -2452,6 +2318,8 @@ void MainWindow::buildMenus() {
     anim->addAction(QStringLiteral("Reveal Animated Properties"),
                     QKeySequence(Qt::Key_U), this,
                     &MainWindow::toggleSelectedLayerProperties);
+    anim->addAction(QStringLiteral("Reveal Audio Level"), QKeySequence(Qt::Key_L), this,
+                    &MainWindow::revealSelectedLayerAudioLevel);
     anim->addAction(QStringLiteral("Previous Keyframe"), QKeySequence(Qt::Key_J), this,
                     [this] { jumpToKeyframe(false); });
     anim->addAction(QStringLiteral("Next Keyframe"), QKeySequence(Qt::Key_K), this,
@@ -2465,9 +2333,8 @@ void MainWindow::buildMenus() {
                       QStringLiteral("Apply Animation Preset...")});
 
     auto* view = menuBar()->addMenu(QStringLiteral("View"));
-    // Named for the timeline explicitly. AE's View > Zoom In means the viewer, and those
-    // three are still pending below; claiming their labels for the timeline would make
-    // the menu lie about which panel it is about to change.
+    // Named "...Timeline" explicitly: AE's View > Zoom In means the viewer, so reusing
+    // that label here would misname which panel it affects.
     view->addAction(QStringLiteral("Zoom In Timeline"),
                     QKeySequence(QStringLiteral("=")), this,
                     [this] { timelinePanel_->zoomIn(); });
@@ -2543,20 +2410,12 @@ QWidget* MainWindow::buildBody() {
     projectTabs_->addPage(pooledPanel_);
     projectTabs_->addPage(makePlaceholder(QStringLiteral("composition map")));
 
-    // Effects and presets, one panel with three tabs. Presets and colour correction have
-    // nothing behind them yet and say so rather than being blank.
+    // Effects/presets/CC in one panel; presets and CC say "nothing here" rather than
+    // being blank.
     effectsTabs_ = new PanelFrame({QStringLiteral("Effects"), QStringLiteral("Presets"),
                                     QStringLiteral("CC")});
-    // Three pages, each fixed to one list, rather than one panel plus two placeholders.
-    //
-    // The old shape had a currentChanged handler calling effectsPanel_->setTab(), which
-    // did nothing visible: switching tabs switched the frame to a placeholder page, so
-    // the panel whose tab had changed was not the one on screen. Dead code that looked
-    // load-bearing.
-    //
-    // Three pages also means the tabs can be dragged apart and still work, which is the
-    // whole point of the tab system, and each one shows its own empty state rather than a
-    // generic placeholder.
+    // Three separate pages, not one panel + placeholders, so tabs can be dragged apart
+    // and each still shows its own content/empty state.
     effectsPanel_ = new EffectsPanel;
     effectsPanel_->setTab(EffectsPanel::Tab::Effects);
 
@@ -2570,9 +2429,8 @@ QWidget* MainWindow::buildBody() {
     effectsTabs_->addPage(presetsPanel);
     effectsTabs_->addPage(ccPanel);
 
-    // A stack, not two docks. The toolbar's Project and fx buttons choose which of these
-    // the left column shows: they are the same reach for the same space, and having both
-    // visible at once would halve a column that is already the narrowest thing on screen.
+    // Stacked, not two docks: toolbar buttons choose which shows, since both visible
+    // would halve an already-narrow column.
     leftDock_ = new QStackedWidget;
     leftDock_->addWidget(projectTabs_);
     leftDock_->addWidget(effectsTabs_);
@@ -2596,19 +2454,16 @@ QWidget* MainWindow::buildBody() {
     viewerTabs_->addPage(makePlaceholder(QStringLiteral("footage viewer")));
     viewerTabs_->addPage(makePlaceholder(QStringLiteral("layer viewer")));
 
-    // Transform and the effect stack share one inspector rather than letting two
-    // panels fight for the same dock.
+    // Transform and effect stack share one inspector rather than fighting for one dock.
     inspectorTabs_ = new PanelFrame({QStringLiteral("Inspector"), QStringLiteral("Align")});
     inspector_ = new InspectorView;
     inspector_->setComposition(&comp);
     inspectorTabs_->addPage(inspector_);
     if (viewport_ != nullptr) {
-        // The viewer needs the same layer sizes the align maths uses: the media pool for
-        // footage, the layout for text. It cannot work either out on its own.
+        // Viewer needs the same layer sizes as align math (media pool / text layout).
         viewport_->setLayerSizes(layerSizes());
 
-        // Clicking a layer in the picture is a real selection, routed through the timeline
-        // so the two panels never hold different opinions about what is selected.
+        // Routed through the timeline so viewer and timeline never disagree on selection.
         connect(viewport_, &GpuViewport::layerPicked, this, [this](core::LayerId id) {
             if (timelinePanel_ != nullptr) {
                 timelinePanel_->selectLayer(id);
@@ -2648,8 +2503,7 @@ QWidget* MainWindow::buildBody() {
     bodySplit_->addWidget(viewerTabs_);
     bodySplit_->addWidget(inspectorTabs_);
 
-    // Every frame that can gain or lose a tab reports it, and visibility is worked out
-    // from the whole layout each time rather than from whichever frame spoke.
+    // Visibility recomputed from the whole layout, not just the frame that changed.
     for (PanelFrame* frame :
          {projectTabs_, effectsTabs_, viewerTabs_, inspectorTabs_}) {
         connect(frame, &PanelFrame::tabsChanged, this,
@@ -2665,17 +2519,13 @@ QWidget* MainWindow::buildBody() {
 
     auto* timeline = new PanelFrame({compName});
     timelineTabs_ = timeline;
-    // The timeline's tabs are open compositions over one shared page, not panels. They
-    // name something inside the panel rather than naming panels, so they do not move and
-    // the strip does not accept anything either.
+    // Timeline tabs name open compositions, not panels; they don't move or accept drops.
     timeline->setTabsMovable(false);
     auto* timelinePanel = new TimelinePanel;
     timelinePanel_ = timelinePanel;
     timelinePanel->setComposition(&comp);
     timeline->addPage(timelinePanel);
 
-    // The viewer used to claim nothing was open while the timeline showed a comp, and its
-    // timecode sat at zero. Both now follow the timeline.
     const double fps = comp.fps;
     connect(timelinePanel, &TimelinePanel::currentTimeChanged, this,
             [this, fps](double seconds) {
@@ -2697,8 +2547,7 @@ QWidget* MainWindow::buildBody() {
                 }
                 updateAlignAvailability();
             });
-    // Cmd-clicking a second layer changes the set without changing the primary, so the
-    // align panel would never hear about it through selectionChanged alone.
+    // Cmd-click changes the set without changing the primary, so align needs its own signal.
     connect(timelinePanel, &TimelinePanel::selectionSetChanged, this,
             &MainWindow::updateAlignAvailability);
     connect(timelinePanel, &TimelinePanel::currentTimeChanged, inspector_,
@@ -2707,14 +2556,12 @@ QWidget* MainWindow::buildBody() {
                                      ? std::optional<core::LayerId>{}
                                      : std::optional<core::LayerId>{comp.layers.front().id});
     inspector_->setCurrentTime(3.14);
-    // Playback drives the timeline, which already propagates time to the viewer, the
-    // inspector and the readouts. One path in, everything follows.
+    // Playback drives the timeline; everything else follows from there.
     playback_ = new Playback(this);
     playback_->configure(comp.duration, comp.fps);
     {
-        // The device is opened unconditionally now. It used to wait until something had
-        // decoded, which meant importing audio into a session that started silent left
-        // you with no device at all.
+        // Device opened unconditionally, not lazily on first decode, so importing audio
+        // into a silent session still gets a device.
         audioOut_ = audio::AudioOutput::create();
         if (audioOut_ != nullptr) {
             loadAudio();
@@ -2724,8 +2571,8 @@ QWidget* MainWindow::buildBody() {
     playback_->seek(3.14);
     connect(playback_, &Playback::timeChanged, timelinePanel,
             &TimelinePanel::setCurrentTime);
-    // Scrubbing by hand while playing would fight the clock, so a scrub stops playback
-    // and hands the position back to the transport.
+    // Ignored while playing, to avoid fighting the transport's own clock; only applies
+    // when paused.
     connect(timelinePanel, &TimelinePanel::currentTimeChanged, this,
             [this](double seconds) {
                 if (playback_->playing()) {
@@ -2755,29 +2602,23 @@ QWidget* MainWindow::buildBody() {
         if (viewport_ != nullptr) {
             viewport_->update();
         }
-        // Locking the selected layer has to grey the align buttons out too, and locking
-        // arrives here rather than through selectionChanged.
+        // Locking arrives here (not via selectionChanged), so align buttons still grey out.
         updateAlignAvailability();
-        // Moving or trimming a bar changes when its sound plays. The mixer holds its own
-        // copy of those times, so it has to be told on every step of the drag, not at the
-        // end: a drag you are listening to should stay in sync while you do it.
+        // Mixer holds its own copy of layer times; rebuilt on every drag step, not just
+        // at the end, so audio stays in sync while dragging.
         rebuildMix();
     });
-    // The view grows the composition itself on mouse release, since it is the thing that
-    // knows a drag ended. The window still has to hear about it: the transport loops on
-    // duration and the status bar owes the user an explanation for the rescale.
+    // View grows the composition on release (it knows when the drag ended); the window
+    // still needs to know since duration affects looping and the status bar.
     connect(timelinePanel, &TimelinePanel::compositionResized, this,
             [this](double) { noteCompositionGrew(); });
-    // Flipping a speaker changes what is audible, so the mix is republished. It is an
-    // undoable edit, which is why the view brackets it with editBegan/editEnded.
+    // Toggling a speaker republishes the mix; undoable via editBegan/editEnded in the view.
     connect(timelinePanel, &TimelinePanel::audioChanged, this, [this] {
         markDirty();
     });
 
-    // The Snapping switch finally does something.
-    // The tools stop being decoration. Selection, Rotation and Anchor do something in the
-    // viewer now; the rest still swallow their clicks there rather than silently acting
-    // like Selection.
+    // Selection, Rotation and Anchor act in the viewer; other tools still swallow clicks
+    // there rather than falling back to Selection.
     connect(toolBar_, &EditorToolBar::toolSelected, this, [this](int index) {
         if (viewport_ != nullptr) {
             viewport_->setTool(EditorToolBar::toolAt(index));
@@ -2797,9 +2638,7 @@ QWidget* MainWindow::buildBody() {
         }
     });
 
-    // Workspaces collapse to a menu rather than a permanent row of names. Ruby has one
-    // layout; the row that After Effects spends on workspace names is worth more spent on
-    // the modes that are specific to this app.
+    // Collapsed to a menu rather than a row of names: Ruby has one layout, unlike AE.
     connect(toolBar_, &EditorToolBar::workspaceMenuRequested, this,
             [this](const QPoint& at) {
                 QMenu menu(this);
@@ -2840,10 +2679,8 @@ QWidget* MainWindow::buildBody() {
             &MainWindow::dropMediaIntoComposition);
     connect(timelinePanel, &TimelinePanel::layerContextMenuRequested, this,
             &MainWindow::showLayerContextMenu);
-    // Dropped onto a specific layer, which is not necessarily the selected one, so it
-    // selects that layer first and then applies. Applying to whatever happened to be
-    // selected while the user is pointing at something else is the same mistake the
-    // right-click menu avoids.
+    // Selects the drop target layer first, then applies; same care the right-click menu
+    // takes to not act on the wrong selection.
     connect(timelinePanel, &TimelinePanel::effectDropped, this,
             [this](core::LayerId layer, const std::string& id) {
                 if (timelinePanel_ != nullptr) {
@@ -2878,9 +2715,8 @@ QWidget* MainWindow::buildBody() {
     outerSplit_->addWidget(timeline);
     outerSplit_->setStretchFactor(0, 1);
 
-    // The design allots 280px of *tracks*. The panel also carries a 26px tab strip and
-    // a 26px sub-toolbar, so it needs 332 for the timeline itself to get its 280.
-    // Sizing this to 280 was clipping the bottom layer on first launch.
+    // Design allots 280px of *tracks*; panel also carries a 26px tab strip and 26px
+    // sub-toolbar, so total height must be 332 for tracks to actually get 280.
     constexpr int kTimelineChrome = metrics::kTabStripH + metrics::kSubToolbarH;
     constexpr int kTimelineTracks = 280;
     outerSplit_->setSizes({428, kTimelineTracks + kTimelineChrome});

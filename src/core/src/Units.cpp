@@ -80,8 +80,29 @@ const char* unitSuffix(SpatialUnit unit) noexcept {
             return " px";
         case SpatialUnit::Normalized:
             return "";
+        case SpatialUnit::Decibels:
+            return " dB";
     }
     return "";
+}
+
+namespace {
+constexpr double kSilenceFloorDb = -96.0;
+}
+
+double linearToDecibels(double linear) noexcept {
+    if (!(linear > 0.0)) {
+        return kSilenceFloorDb;
+    }
+    const double db = 20.0 * std::log10(linear);
+    return db < kSilenceFloorDb ? kSilenceFloorDb : db;
+}
+
+double decibelsToLinear(double decibels) noexcept {
+    if (decibels <= kSilenceFloorDb) {
+        return 0.0;
+    }
+    return std::pow(10.0, decibels / 20.0);
 }
 
 }  // namespace ruby::core

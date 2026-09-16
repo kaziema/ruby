@@ -1,7 +1,4 @@
-// Saving and loading a project. The round trip has to be lossless for anything a user
-// can change, and the loader has to survive files that are wrong in the ways real files
-// go wrong: hand-edited, truncated, written by a different version, referencing media
-// that has since been removed.
+// Round trip must be lossless, and the loader must survive malformed real-world files.
 
 #include <algorithm>
 #include <cmath>
@@ -39,9 +36,7 @@ core::Project makeProject() {
                          {3.083, core::MarkerLane::Vocal, 0.61f, 1}});
     comp.rhythm.addUserMarker(5.5);
 
-    // The solid is created FIRST, and that ordering is load-bearing: addLayer inserts at
-    // the front, so any Layer& taken before another addLayer call is left dangling. Adding
-    // it after the footage layer below hung this test on a write through a dead reference.
+    // Solid must be created first: addLayer inserts at front, so an earlier Layer& dangles.
     {
         core::Layer& solid = p.addLayer(comp, "Backdrop", core::LayerKind::Solid);
         solid.solidColor = core::Value::rgba(0.25, 0.5, 0.75, 1.0);
@@ -55,8 +50,7 @@ core::Project makeProject() {
     layer.inPoint = core::TimeValue::beats(2.0);
     layer.outPoint = core::TimeValue::seconds(9.25);
     layer.expanded = true;
-    // The eye and the speaker are separate switches, so a project has to be able to say
-    // "visible but muted" and have that mean something after a reload.
+    // Eye and speaker are separate switches; "visible but muted" must survive reload.
     layer.enabled = true;
     layer.audioEnabled = false;
     layer.locked = true;
@@ -89,9 +83,7 @@ core::Project makeProject() {
     return p;
 }
 
-// A file can contain a parent loop from a hand edit, a merge, or a buggy writer. The
-// render path tolerates one, but the loader is the place that sees the whole document and
-// can actually repair it.
+// The loader must repair parent loops from hand edits, merges, or buggy writers.
 void a_parent_loop_in_a_file_is_broken_on_load() {
     core::Project source;
     core::Composition& comp =
@@ -181,16 +173,12 @@ int main() {
     check(layer.expanded, "twirl state survives");
     check(layer.enabled, "the eye survives");
     check(!layer.audioEnabled, "and the speaker survives independently of it");
-    // A locked layer that comes back unlocked is worse than one that never locked: the
-    // user thinks it is protected and it is not.
+    // A locked layer returning unlocked is worse than never locking: false security.
     check(layer.locked, "the padlock survives a save and reopen");
-    // The work area is the export range too, so losing it on save would silently change
-    // what an export writes.
+    // Work area is also the export range; losing it would silently change exports.
     check(comp.hasWorkArea(), "the work area survives a save and reopen");
 
-    // Ranges are deliberately not written to the file, so a reloaded property arrives
-    // with default ones. `adoptTransformRanges` is what puts them back, and a project
-    // that skipped it would have Opacity unbounded and Position scrubbing at a crawl.
+    // Ranges aren't written to file; adoptTransformRanges restores them on load.
     const core::Property* op = layer.find("opacity");
     check(op != nullptr, "the reloaded layer still has opacity");
     if (op != nullptr) {
@@ -202,12 +190,10 @@ int main() {
     check(after != nullptr && after->range.maximum.has_value() &&
               *after->range.maximum == 100.0,
           "and the definition supplies it on load");
-    // Group expansion is per layer and per effect, so reopening a project puts the
-    // timeline back the way it was left rather than fully twirled open every time.
+    // Group expansion is per layer/effect; reload must not force everything open.
     check(!layer.transformExpanded, "a shut Transform group stays shut");
 
-    // A project written before the speaker switch existed has no audioEnabled key. It
-    // must open audible: defaulting to false would silently mute every old project.
+    // Old files lack audioEnabled; must default to audible, not silently mute.
     {
         std::string json = io::toJson(original);
         const std::string key = "\"audioEnabled\": false,";
@@ -249,8 +235,7 @@ int main() {
     check(layer.effects[0].schema == 1, "its schema version is recorded for migration");
     check(layer.effects[0].params.size() == 1, "its parameters survive");
 
-    // Hand-placed markers are the one thing re-analysis must never destroy, so they
-    // had better survive a save too.
+    // Hand-placed markers must survive a save too.
     check(comp.rhythm.markers().size() == 3, "every marker survives");
     check(comp.rhythm.nearestIn(5.5, {core::MarkerLane::User}).has_value(),
           "the user marker survives with its lane intact");

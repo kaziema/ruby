@@ -48,9 +48,8 @@ constexpr int kSwitchesW = metrics::kSwitchesW;
 constexpr int kPreserveW = metrics::kPreserveW;
 constexpr int kTrkMatW = metrics::kTrkMatW;
 
-// Where each A/V toggle sits, as a half-open span. Written down once because the painter
-// and the hit test each used to carry their own copy of these numbers and they had
-// already drifted apart by two pixels.
+// Where each A/V toggle sits, as a half-open span. Written once so painter and hit test
+// can't drift apart (they used to).
 constexpr int kEyeX = 6, kEyeEnd = 24;
 constexpr int kAudioX = 24, kAudioEnd = 40;
 constexpr int kSoloX = 40, kSoloEnd = 56;
@@ -68,13 +67,8 @@ enum class Switch {
     ThreeD,       // treat the layer as a 3D layer
 };
 
-// fx is the only one of the eight Ruby does anything with today. The rest are drawn and
-// inert, and each says so in its tooltip below.
-//
-// A column that is simply missing teaches the wrong shape: people learn where things are
-// by position, and a timeline that grows two columns later moves everything they learned.
-// Drawing it grey and doing nothing is honest about the state of the app in a way that
-// leaving a gap is not.
+// Only fx is functional today; the rest are drawn inert (tooltip says so) to keep the
+// column layout stable as features land.
 const char* switchTip(Switch s) {
     switch (s) {
         case Switch::Shy:
@@ -103,8 +97,8 @@ const char* switchTip(Switch s) {
     return "";
 }
 
-// A 14px switch glyph. Drawn from primitives rather than a font, because at this size a
-// glyph from a font is whatever the platform decided it was.
+// A 14px switch glyph, drawn from primitives (a font glyph at this size is unpredictable
+// across platforms).
 void drawSwitchGlyph(QPainter& p, Switch which, const QRect& box, const QColor& ink) {
     const double cx = box.center().x() + 0.5;
     const double cy = box.center().y() + 0.5;
@@ -234,9 +228,8 @@ TimelineView::TimelineView(QWidget* parent) : QWidget(parent) {
 }
 
 void TimelineView::setComposition(core::Composition* comp) {
-    // This is called for plain refreshes as well as for genuine switches, so the zoom
-    // can only be reset when the composition actually changed. Resetting on every
-    // refresh would throw the user out of their zoom every time they nudged a layer.
+    // Only reset zoom on an actual comp switch, not every refresh (else nudging a layer
+    // would reset zoom).
     const core::CompId previous = comp_ != nullptr ? comp_->id : 0;
     const core::CompId incoming = comp != nullptr ? comp->id : 0;
 
@@ -269,12 +262,8 @@ void TimelineView::setScrollY(int y) {
 void TimelineView::setSnapping(bool on) { snapping_ = on; }
 
 void TimelineView::selectLayer(core::LayerId layer) {
-    // A locked layer refuses selection here, not only in the click handler.
-    //
-    // Refusing it in mousePressEvent alone was not a lock: right clicking a locked layer
-    // ran through here to open its menu, and every layer command in the window acts on
-    // whatever is selected, so delete, duplicate, split and precompose all worked on a
-    // layer whose padlock was shut. One guard at the one place selection is set.
+    // Locked layers refuse selection here, not just in the click handler, since every
+    // layer command acts on whatever is selected regardless of entry point.
     selectLayer(layer, SelectMode::Replace);
 }
 
@@ -283,8 +272,7 @@ bool TimelineView::isSelected(core::LayerId layer) const noexcept {
 }
 
 void TimelineView::selectLayer(core::LayerId layer, SelectMode mode) {
-    // A locked layer refuses selection however it is asked, which is the guard that makes
-    // the padlock mean anything: every layer command in the window acts on the selection.
+    // Locked layers can't be selected by any path; every layer command acts on the selection.
     const core::Layer* target = comp_ != nullptr ? comp_->find(layer) : nullptr;
     if (target == nullptr || target->locked) {
         return;
@@ -306,9 +294,8 @@ void TimelineView::selectLayer(core::LayerId layer, SelectMode mode) {
         }
 
         case SelectMode::Range: {
-            // Everything between the primary and this one, by row order rather than by id.
-            // Ids are creation order and a layer that has been dragged up the stack would
-            // otherwise select a run that does not match what the user is pointing at.
+            // Range by row order, not id order (ids are creation order, so a reordered
+            // layer would otherwise select the wrong run).
             if (selected_.empty() || comp_ == nullptr) {
                 selected_.assign(1, layer);
                 break;
@@ -328,9 +315,7 @@ void TimelineView::selectLayer(core::LayerId layer, SelectMode mode) {
             const int lo = std::min(anchor, to);
             const int hi = std::max(anchor, to);
 
-            // The anchor stays the primary, so shift-clicking again re-extends from the
-            // same end rather than pivoting around wherever the range last happened to
-            // finish. Dragging a range out and then shortening it is one gesture.
+            // Anchor stays primary so repeated shift-clicks re-extend from the same end.
             std::vector<core::LayerId> run;
             for (int i = lo; i <= hi; ++i) {
                 const core::Layer& l = comp_->layers[static_cast<std::size_t>(i)];
@@ -350,8 +335,8 @@ void TimelineView::selectLayer(core::LayerId layer, SelectMode mode) {
         }
     }
 
-    // Keys belonging to layers that just left the selection would otherwise stay selected
-    // and invisible, which is how Delete ends up acting on something nobody can see.
+    // Drop key selections whose layer just left selection (else Delete could act on
+    // invisible keys).
     selectedKeys_.erase(std::remove_if(selectedKeys_.begin(), selectedKeys_.end(),
                                        [this](const KeyRef& k) {
                                            return !isSelected(k.layer);
@@ -371,21 +356,40 @@ void TimelineView::revealAnimated(core::LayerId layer) {
     if (target == nullptr) {
         return;
     }
-    // Already showing only animated properties: close it. Otherwise open it in that mode,
-    // whether it was closed or showing everything.
+    // Toggle: close if already showing animated-only, else open into that mode.
     if (target->expanded && revealAnimated_.count(layer) != 0) {
         target->expanded = false;
         revealAnimated_.erase(layer);
     } else {
         target->expanded = true;
         revealAnimated_.insert(layer);
-        // U means "show me what is animated on this layer", so it opens the groups too.
-        // Otherwise it would open a layer onto a shut Transform and answer the question
-        // with a closed door.
+        audioLevelRevealed_.erase(layer);
+        // Also open Transform/effect groups, or there'd be nothing animated visible.
         target->transformExpanded = true;
         for (core::EffectInstance& fx : target->effects) {
             fx.expanded = true;
         }
+    }
+    rebuildRows();
+    update();
+}
+
+void TimelineView::revealAudioLevel(core::LayerId layer) {
+    if (comp_ == nullptr) {
+        return;
+    }
+    core::Layer* target = comp_->find(layer);
+    if (target == nullptr || peaksFor(*target) == nullptr) {
+        return;  // no audio, nothing for L to reveal
+    }
+    if (target->expanded && audioLevelRevealed_.count(layer) != 0) {
+        target->expanded = false;
+        audioLevelRevealed_.erase(layer);
+    } else {
+        target->expanded = true;
+        target->transformExpanded = true;
+        audioLevelRevealed_.insert(layer);
+        revealAnimated_.erase(layer);
     }
     rebuildRows();
     update();
@@ -400,9 +404,10 @@ void TimelineView::toggleExpanded(core::LayerId layer) {
         return;
     }
     target->expanded = !target->expanded;
-    // The arrow always means "show me everything", so opening this way clears the filter
-    // U may have left behind.
+    // The arrow always means "show me everything", so opening this way clears whatever
+    // filter U or L left behind.
     revealAnimated_.erase(layer);
+    audioLevelRevealed_.erase(layer);
     rebuildRows();
     update();
 }
@@ -425,8 +430,7 @@ const media::PeakPyramid* TimelineView::peaksFor(const Layer& layer) const {
 
 void TimelineView::clearSelection() {
     selected_.clear();
-    // Keyframe selection goes with it. Leaving keys selected on a layer that is no
-    // longer selected is how J/K and Delete end up acting on something invisible.
+    // Keyframe selection goes with it (else J/K, Delete could act on invisible keys).
     selectedKeys_.clear();
     rebuildRows();
     update();
@@ -463,10 +467,9 @@ QString rulerLabel(double seconds, double step) {
 
 int TimelineView::trackLeft() const noexcept { return metrics::kLayerColumnW; }
 
-// The right-hand columns, laid out from the track edge inward. Computed in one place
-// because they were previously computed at eight call sites, and two of them disagreed.
-//
-// Read backwards this is AE's order: switches, Mode, T, Track Matte, Parent, keys, track.
+// Right-hand columns, laid out from the track edge inward, in one place (used to be
+// computed at eight call sites, some of which disagreed). Read backwards: AE's order —
+// switches, Mode, T, Track Matte, Parent, keys, track.
 int TimelineView::navLeft() const noexcept { return trackLeft() - kNavW; }
 int TimelineView::parentLeft() const noexcept { return navLeft() - kParentW; }
 int TimelineView::trkMatLeft() const noexcept { return parentLeft() - kTrkMatW; }
@@ -483,9 +486,8 @@ int TimelineView::switchAt(int x) const noexcept {
                : -1;
 }
 
-// The track region. Everything drawn on the time axis is clipped to this, because with
-// a scrolled view a bar's left edge lands at a negative x and would otherwise paint
-// straight over the layer names, mode and parent columns.
+// Track region; everything on the time axis clips to this so a scrolled bar's negative-x
+// edge doesn't paint over the layer/mode/parent columns.
 QRect TimelineView::trackRect() const noexcept {
     return {trackLeft(), 0, trackWidth(), height()};
 }
@@ -504,9 +506,8 @@ double TimelineView::timeForX(int x) const noexcept {
     const double span = viewSpan_ > 0.0 ? viewSpan_ : duration();
     const double rel = static_cast<double>(x - trackLeft()) /
                        static_cast<double>(trackWidth());
-    // Clamped to the visible window, not to the composition: you cannot drag something
-    // to a time that is not on screen, and letting the value run off produces bars that
-    // silently teleport when the mouse leaves the widget.
+    // Clamped to the visible window, not the comp: letting it run off would teleport
+    // bars silently once the mouse left the widget.
     return viewStart_ + std::clamp(rel, 0.0, 1.0) * span;
 }
 
@@ -535,8 +536,7 @@ double TimelineView::minimumSpan() const noexcept {
 }
 
 void TimelineView::setViewSpan(double span, double anchorSeconds) {
-    // Hold anchorSeconds at the same fraction across the track. Without this the view
-    // recentres on every step and zooming in on a specific cut becomes a chase.
+    // Hold anchorSeconds at the same fraction across the track, or zoom keeps recentring.
     const double current = viewSpan_ > 0.0 ? viewSpan_ : duration();
     const double frac = std::clamp((anchorSeconds - viewStart_) / current, 0.0, 1.0);
 
@@ -545,8 +545,8 @@ void TimelineView::setViewSpan(double span, double anchorSeconds) {
     viewStart_ = anchorSeconds - frac * viewSpan_;
     clampView();
 
-    // Clamping can hand back the whole composition, and that IS fit, whatever the user
-    // was doing to get there. Saying otherwise strands them out of fit-follows-duration.
+    // If clamping lands back on the whole comp, that counts as fit regardless of how we
+    // got there.
     fit_ = viewStart_ <= 1e-9 && viewSpan_ >= duration() - 1e-9;
 
     update();
@@ -578,9 +578,8 @@ void TimelineView::durationChanged() {
     emit viewRangeChanged(viewStart_, viewSpan_);
 }
 
-// Ticks land on a 1/2/5 progression so labels stay round however far you zoom, and the
-// interval is chosen by how much room a label needs, not by the duration. A tick every
-// second is fine at 12 seconds and 3600 lines of overdraw at an hour.
+// 1/2/5 tick progression keeps labels round at any zoom; interval is picked from label
+// width, not duration, so it doesn't overdraw at an hour-long comp.
 double TimelineView::tickInterval() const noexcept {
     const double span = viewSpan_ > 0.0 ? viewSpan_ : duration();
     const double minPixels = 64.0;
@@ -646,15 +645,11 @@ void TimelineView::rebuildRows() {
             y += metrics::kPropertyRowH;
         };
 
-        // A Transform group with ALL of its properties, not just the animated ones.
-        //
-        // This was the bug: the twirl showed only properties that already had keyframes,
-        // so opening a fresh layer showed nothing at all and there was no way to reach
-        // Position or Scale from the timeline. The comment here used to claim this
-        // matched AE and it did not. AE's twirl shows the Transform group whatever state
-        // it is in; showing only the animated ones is what U does, and U is a separate
-        // thing that now lives in `revealAnimated_`.
+        // Twirl shows all Transform properties, not just animated ones; animated-only is
+        // U's job (`revealAnimated_`), a separate mode.
         const bool animatedOnly = revealAnimated_.count(layer.id) != 0;
+        // L: only the Audio Level row, nothing else — no other properties, no effects.
+        const bool audioOnly = audioLevelRevealed_.count(layer.id) != 0;
 
         Row transform;
         transform.kind = RowKind::EffectHeader;
@@ -667,16 +662,17 @@ void TimelineView::rebuildRows() {
 
         if (layer.transformExpanded) {
             for (std::size_t i = 0; i < layer.properties.size(); ++i) {
-                if (!animatedOnly || layer.properties[i].animated()) {
+                const bool isAudioLevel = layer.properties[i].key == core::kAudioLevelKey;
+                if (audioOnly ? isAudioLevel
+                              : (!animatedOnly || layer.properties[i].animated())) {
                     pushProperty(-1, i);
                 }
             }
         }
 
-        // Then each effect, with a header so it is obvious which stack a parameter
-        // belongs to. The header shows even when nothing under it is animated, because
-        // a silently absent effect is worse than an empty one.
-        for (std::size_t e = 0; e < layer.effects.size(); ++e) {
+        // Header shown even if nothing under it is animated; a silently missing effect
+        // would be worse than an empty one.
+        for (std::size_t e = 0; e < layer.effects.size() && !audioOnly; ++e) {
             const core::EffectInstance& effect = layer.effects[e];
 
             Row header;
@@ -707,9 +703,7 @@ void TimelineView::paintEffectHeader(QPainter& p, const Row& row,
     p.fillRect(QRect(0, row.top, width(), row.height), kRowProperty);
     const int cy = row.top + row.height / 2;
 
-    // The Transform group reuses this row kind with a sentinel index rather than getting
-    // a kind of its own: it looks the same, sits in the same place, and the only thing
-    // that differs is the label and the marker colour.
+    // Transform reuses this row kind via a sentinel index; only label/marker color differ.
     const bool isTransform = row.effect == kTransformGroup;
     const auto e = static_cast<std::size_t>(row.effect);
     if (!isTransform && e >= layer.effects.size()) {
@@ -717,27 +711,28 @@ void TimelineView::paintEffectHeader(QPainter& p, const Row& row,
     }
     const bool open = isTransform ? layer.transformExpanded : layer.effects[e].expanded;
 
-    // The twirl, indented one step from the layer's own. Same glyphs as the layer row,
-    // because it is the same gesture at a smaller scale and there is no reason to make
-    // someone learn it twice.
+    // Group twirl: same glyphs as the layer row, indented one step in.
     p.setFont(font());
     p.setPen(kTextDim);
     p.drawText(QRect(groupTwirlLeft(), row.top, kGroupTwirlW, row.height),
                Qt::AlignCenter, open ? QStringLiteral("▾") : QStringLiteral("▸"));
 
     if (isTransform) {
+        // L filters this same row down to just Audio Level; say so rather than still
+        // calling it "Transform".
+        const bool audioOnly = audioLevelRevealed_.count(layer.id) != 0;
         p.fillRect(QRect(kPropIndent - 26, cy - 4, 8, 8), kTextDim);
         p.setPen(kTextBody);
         p.drawText(QRect(kPropIndent - 14, row.top, 200, row.height),
-                   Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("Transform"));
+                   Qt::AlignVCenter | Qt::AlignLeft,
+                   audioOnly ? QStringLiteral("Audio") : QStringLiteral("Transform"));
         paintGroupKeys(p, row, layer);
         return;
     }
 
     const core::EffectInstance& effect = layer.effects[e];
 
-    // Same green fx marker the inspector uses, so the two panels agree about what an
-    // effect looks like.
+    // Same fx marker color as the inspector.
     p.fillRect(QRect(kPropIndent - 26, cy - 4, 8, 8), kExpressionText);
 
     p.setPen(effect.enabled ? kTextBody : kTextFaint);
@@ -748,19 +743,14 @@ void TimelineView::paintEffectHeader(QPainter& p, const Row& row,
     paintGroupKeys(p, row, layer);
 }
 
-// Every key under a shut group, drawn hollow on the group's own row.
-//
-// Without this, collapsing a group hides the animation as well as the rows, and the
-// timeline stops being a picture of when things happen. AE draws these for the same
-// reason. Hollow rather than solid so a summary is never mistaken for a key you can grab:
-// they are a readout, and the way to edit one is to open the group.
+// Every key under a shut group, drawn hollow (a readout, not grabbable) on the group's
+// own row, so collapsing a group doesn't hide its animation too.
 void TimelineView::toggleGroup(core::LayerId id, int effect) {
     Layer* layer = comp_ != nullptr ? comp_->find(id) : nullptr;
     if (layer == nullptr) {
         return;
     }
-    // Not an undoable edit, the same way twirling a layer open is not. Filling someone's
-    // undo stack with "I looked at this" is how the stack stops being useful.
+    // Not undoable, like twirling a layer open — view state, not a document edit.
     if (effect == kTransformGroup) {
         layer->transformExpanded = !layer->transformExpanded;
     } else if (effect >= 0 && effect < static_cast<int>(layer->effects.size())) {
@@ -870,8 +860,7 @@ double TimelineView::snapTime(double seconds, core::LayerId ignore) const {
         return seconds;
     }
 
-    // Pixels, not seconds. A time threshold is an enormous grab radius zoomed out and
-    // unreachable zoomed in; the feel has to be constant on screen.
+    // Pixels, not seconds, so the grab radius stays constant on screen at any zoom.
     constexpr double kThresholdPx = 8.0;
     const double cursorX = xForTime(seconds);
 
@@ -899,7 +888,7 @@ double TimelineView::snapTime(double seconds, core::LayerId ignore) const {
         consider(to_seconds(layer.outPoint, ctx));
     }
 
-    // The part no other editor has: cuts grab the syllable.
+    // Rhythm markers snap too.
     for (const core::Marker& marker : comp_->rhythm.markers()) {
         consider(marker.seconds);
     }
@@ -909,8 +898,7 @@ double TimelineView::snapTime(double seconds, core::LayerId ignore) const {
 
 TimelineView::DragMode TimelineView::hitTestBar(const Layer& layer, const QPoint& pos,
                                                 const Row& row) const {
-    // A locked layer has no grab handles at all, which is the whole of "move and trim
-    // are refused": there is nothing to say no to later because nothing was picked up.
+    // Locked layers have no grab handles at all.
     if (comp_ == nullptr || layer.locked || pos.x() < trackLeft()) {
         return DragMode::None;
     }
@@ -923,8 +911,7 @@ TimelineView::DragMode TimelineView::hitTestBar(const Layer& layer, const QPoint
     const double right = xForTime(to_seconds(layer.outPoint, ctx));
     const double x = pos.x();
 
-    // Edge grabs win over the body. Kept small so a short bar is still movable, and
-    // clamped so a very short bar does not become all edge and nothing to drag.
+    // Edge grabs win over body; clamped so a short bar keeps some movable middle.
     const double edge = std::min(6.0, std::max(2.0, (right - left) / 3.0));
     if (x >= left - edge && x <= left + edge) {
         return DragMode::TrimIn;
@@ -948,11 +935,8 @@ void TimelineView::setCachedSpans(std::vector<CachedSpan> spans) {
 
 int TimelineView::rulerBottom() const noexcept { return metrics::kColumnHeaderH; }
 
-// The work area: the part you are working on, and the part you will deliver.
-//
-// Drawn as a lighter bar over a darkened rest, rather than as two brackets on an unchanged
-// ruler. The question it answers is "which part of this is live", and shading the answer
-// reads at a glance where two small marks have to be looked for.
+// Work area: shaded as a lighter bar over a darkened rest rather than two brackets, so
+// "which part is live" reads at a glance.
 void TimelineView::paintWorkArea(QPainter& p) const {
     if (comp_ == nullptr) {
         return;
@@ -972,8 +956,7 @@ void TimelineView::paintWorkArea(QPainter& p) const {
     const int x1 = static_cast<int>(xForTime(to));
     p.fillRect(QRect(x0, top, std::max(1, x1 - x0), h), QColor("#2a2a2a"));
 
-    // The two ends, which are what you grab. Three pixels wide because one is not a
-    // target: every drag handle in this app that was one pixel wide got widened later.
+    // 3px grab handles (1px drag handles proved unhittable elsewhere in this app).
     p.fillRect(QRect(x0, top, 3, h), kWorkAreaEdge);
     p.fillRect(QRect(x1 - 3, top, 3, h), kWorkAreaEdge);
     p.restore();
@@ -994,8 +977,7 @@ void TimelineView::paintCacheBar(QPainter& p) const {
         if (x1 < trackLeft() || x0 > width()) {
             continue;
         }
-        // At least a pixel. A single cached frame at a zoomed-out view rounds to nothing,
-        // and a cache that shows nothing while holding something is worse than no bar.
+        // Floor of 1px so a cached span never rounds away to invisible.
         p.fillRect(QRect(x0, top, std::max(1, x1 - x0), h),
                    span.onDisk ? kCacheDisk : kCacheRam);
     }
@@ -1003,8 +985,7 @@ void TimelineView::paintCacheBar(QPainter& p) const {
 }
 
 void TimelineView::paintHeader(QPainter& p) const {
-    // The label row only. The work area and cache bar occupy the rest of the header and
-    // are drawn by their own functions, below.
+    // Label row only; work area and cache bar are drawn by their own functions below.
     const int h = metrics::kColumnLabelH;
 
     p.fillRect(QRect(0, 0, width(), metrics::kColumnHeaderH), kColumnHeader);
@@ -1020,8 +1001,7 @@ void TimelineView::paintHeader(QPainter& p) const {
     p.drawText(QRect(kAvW + kIndexW + 20, 0, 160, h), Qt::AlignVCenter | Qt::AlignLeft,
                QStringLiteral("Source Name"));
 
-    // The switches column heads itself with the glyphs, because that is the only label
-    // that would fit and because the icon is the thing you have to learn anyway.
+    // Switches column heads itself with the glyphs (no room for text labels).
     for (int i = 0; i < metrics::kSwitchCount; ++i) {
         drawSwitchGlyph(p, static_cast<Switch>(i),
                         QRect(switchesLeft() + 2 + i * kSwitchW, 0, kSwitchW, h),
@@ -1037,13 +1017,10 @@ void TimelineView::paintHeader(QPainter& p) const {
                Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("Track Matte"));
     p.drawText(QRect(parentLeft(), 0, kParentW, h),
                Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("Parent"));
-    // A diamond rather than the word "Keys": the column is 52px and the control under it
-    // is three glyphs, so a heading that says what it looks like beats one that says what
-    // it is called.
+    // Diamond glyph instead of "Keys" label \u2014 matches the 3-glyph control under it.
     p.drawText(QRect(navLeft(), 0, kNavW, h), Qt::AlignCenter, QStringLiteral("\u25c7"));
 
-    // Ruler. Only the visible window is walked, and the spacing adapts, so this costs
-    // the same at twelve seconds as it does at three hours.
+    // Ruler: only the visible window is walked, so cost doesn't scale with duration.
     p.save();
     p.setClipRect(trackRect());
     const double step = tickInterval();
@@ -1111,8 +1088,7 @@ bool TimelineView::nearestKey(const core::Layer& layer, bool forward, double& ou
     for (const core::Property& prop : layer.properties) {
         consider(prop);
     }
-    // Effect parameters count too. A layer whose only animation is a Glow's intensity is
-    // still an animated layer, and stepping past it would be a lie by omission.
+    // Effect parameters count too, not just the layer's own.
     for (const core::EffectInstance& fx : layer.effects) {
         for (const core::Property& prop : fx.params) {
             consider(prop);
@@ -1122,11 +1098,8 @@ bool TimelineView::nearestKey(const core::Layer& layer, bool forward, double& ou
     return found;
 }
 
-// Previous key, a diamond for the key at this time, next key.
-//
-// `hasKeyHere` fills the diamond, and that is the whole readout: filled means the playhead
-// is sitting exactly on a key, hollow means it is between them. Without it the control
-// says where you can go and nothing about where you are.
+// Previous key / diamond for this time / next key. `hasKeyHere` fills the diamond:
+// filled means the playhead sits exactly on a key.
 void TimelineView::paintKeyNavigator(QPainter& p, const Row& row, bool hasKeyHere,
                                      bool canGoBack, bool canGoForward) const {
     const int x = navLeft();
@@ -1153,16 +1126,14 @@ void TimelineView::paintSwitches(QPainter& p, const Row& row, const Layer& layer
         const auto which = static_cast<Switch>(i);
         const QRect box(left + i * kSwitchW, row.top, kSwitchW, row.height);
 
-        // fx only exists on a layer that has effects, the way it does in AE. An fx mark
-        // on a layer with nothing applied would be a switch for a thing that is not there.
+        // fx switch only exists on a layer that actually has effects (matches AE).
         if (which == Switch::Effects && layer.effects.empty()) {
             continue;
         }
 
         QColor ink = QColor("#4d4d4d");
         if (which == Switch::Effects) {
-            // Green when at least one effect is running, grey when they are all off. The
-            // same green the effects panel and the inspector use for an effect.
+            // Green when any effect is on, matching the effects panel/inspector color.
             const bool anyOn = std::any_of(
                 layer.effects.begin(), layer.effects.end(),
                 [](const core::EffectInstance& e) { return e.enabled; });
@@ -1186,10 +1157,7 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
     p.drawText(QRect(kEyeX, row.top, kEyeEnd - kEyeX, row.height), Qt::AlignCenter,
                QStringLiteral("◉"));
 
-    // The speaker. Drawn only on layers that actually carry audio, and absent otherwise,
-    // which is how AE says "this layer has no sound" without spending a pixel on it. It
-    // used to be a decorative dot, always present, green if the layer happened to be
-    // LayerKind::Audio, and clicking it did nothing.
+    // Speaker dot only drawn for layers that actually carry audio.
     if (peaksFor(layer) != nullptr) {
         p.setRenderHint(QPainter::Antialiasing, true);
         p.setPen(Qt::NoPen);
@@ -1203,9 +1171,7 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
     p.drawRect(QRect(kSoloX + 4, cy - 3, 7, 7));
     p.setBrush(Qt::NoBrush);
 
-    // The padlock. Shackle plus body, and only the body when it is open, which is the
-    // difference you can read at 11 pixels. A closed padlock drawn faint would be the
-    // same picture twice.
+    // Padlock: shackle + body when locked, body only when open.
     {
         const double lx = kLockX + 5.5;
         p.save();
@@ -1269,27 +1235,20 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
                layer.kind == core::LayerKind::Audio ? QStringLiteral("—")
                                                     : blendName(layer.blend));
 
-    // Preserve Underlying Transparency: an empty box, and it stays empty. Nothing in the
-    // compositor reads a per-layer alpha rule yet, so this is the column, not the feature.
+    // Preserve Underlying Transparency: column exists, not wired to the compositor yet.
     p.setPen(QPen(QColor("#4a4a4a"), 1.0));
     p.drawRect(QRect(preserveLeft() + 3, cy - 4, 8, 8));
 
-    // Track Matte. A dropdown in AE; here it is the word "None" and no menu, for the same
-    // reason: mattes are not implemented, and offering the choices would be offering to
-    // do something Ruby cannot do.
+    // Track Matte: "None", no dropdown — mattes aren't implemented.
     p.setPen(kTextFaint);
     p.drawText(QRect(trkMatLeft() + 2, row.top, kTrkMatW - 4, row.height),
                Qt::AlignVCenter | Qt::AlignLeft, QStringLiteral("None"));
     p.setPen(kTextDim);
-    // The real parent, not a hardcoded "None". This column has said None on every row
-    // since it was drawn, including on layers that were parented.
     QString parentName = QStringLiteral("None");
     if (layer.parent.has_value()) {
         const Layer* owner = comp_->find(*layer.parent);
+        // Dangling parent id: say so rather than showing "None" (looks like unparented).
         parentName = owner != nullptr ? QString::fromStdString(owner->name)
-                                      // A parent id with no layer behind it. Say so
-                                      // rather than showing None, which would look like
-                                      // the link had been cleanly removed.
                                       : QStringLiteral("(missing)");
     }
     p.drawText(QRect(parentLeft(), row.top, kParentW, row.height),
@@ -1298,10 +1257,8 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
 
     // The bar, on the track side.
     const core::TimeContext ctx = comp_->timeContext();
-    // Clamped to just outside the widget for DRAWING only. Zoomed all the way in, a bar
-    // edge can sit a billion pixels off screen, and the waveform loop below casts those
-    // bounds to int. Hit testing uses the unclamped values, as it should: a click is
-    // always inside the widget, so the comparison works either way.
+    // Clamped just outside the widget for drawing only (an offscreen bar edge would
+    // overflow the int cast in the waveform loop below). Hit testing stays unclamped.
     const double drawLo = static_cast<double>(trackLeft()) - 64.0;
     const double drawHi = static_cast<double>(width()) + 64.0;
     const double x0 = std::clamp(xForTime(to_seconds(layer.inPoint, ctx)), drawLo, drawHi);
@@ -1316,13 +1273,8 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
     p.fillRect(bar, colors.bar);
     p.fillRect(QRectF(bar.left(), bar.top(), bar.width(), 1.0), colors.topEdge);
 
-    // Waveform inside the bar, drawn from the mipmap level that matches the zoom.
-    //
-    // The base level is 150 buckets/sec. Zoomed out to an hour that is ~450 buckets per
-    // pixel, which is 540k reads per layer per repaint just to draw a thousand columns.
-    // levelFor picks the coarsest level that still has a bucket per pixel, so the work
-    // per pixel stays roughly constant however far out you go. Olive has this exact
-    // problem open as an unfixed issue; the pyramid is why we do not.
+    // Waveform drawn from the mipmap level matching the zoom (levelFor picks the coarsest
+    // level with at least a bucket per pixel), so per-pixel cost stays roughly constant.
     if (const media::PeakPyramid* pyramid = peaksFor(layer); pyramid != nullptr) {
         const double secondsPerPixel =
             (viewSpan_ > 0.0 ? viewSpan_ : duration()) /
@@ -1333,11 +1285,7 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
             const double mid = bar.center().y();
             const double half = bar.height() * 0.5 - 1.0;
 
-            // Buckets are indexed from the START OF THE SOURCE, not from the start of the
-            // composition. Indexing straight off composition time only looked right while
-            // every audio layer began at zero: a clip dropped at 8.6s drew the waveform
-            // from 8.6s into its own audio, so the picture belonged to a different part of
-            // the clip than the sound.
+            // Buckets index from the start of the source, not the composition.
             const double layerIn = to_seconds(layer.inPoint, ctx);
 
             p.setPen(QPen(colors.topEdge.lighter(135), 1.0));
@@ -1356,9 +1304,7 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
                 if (b0 >= level->count()) {
                     break;
                 }
-                // Still take the extremes across the pixel. The level guarantees this is
-                // a handful of buckets rather than hundreds, but a pixel that lands
-                // between buckets must not lose the louder of the two.
+                // Take min/max across the (small) bucket range for this pixel.
                 float lo = 0.0f;
                 float hi = 0.0f;
                 for (std::size_t b = b0; b <= std::min(b1, level->count() - 1); ++b) {
@@ -1373,8 +1319,7 @@ void TimelineView::paintLayerRow(QPainter& p, const Row& row, const Layer& layer
     p.setPen(QPen(QColor("#0d0d0d"), 1.0));
     p.drawLine(QPointF(bar.left(), bar.bottom()), QPointF(bar.right(), bar.bottom()));
 
-    // A layer may legitimately run past the end of the composition. Mark the overhang so
-    // it reads as "there is more clip here" rather than as a drawing glitch.
+    // Mark the overhang past comp end so it reads as clip, not a drawing glitch.
     const double compEnd = xForTime(comp_->duration);
     if (bar.right() > compEnd + 1.0) {
         const QRectF beyond(std::max(bar.left(), compEnd), bar.top(),
@@ -1481,8 +1426,7 @@ void TimelineView::paintRhythm(QPainter& p) const {
             continue;
         }
 
-        // Lane decides the colour, strength decides the weight. A weak onset should not
-        // look as certain as a strong one, because it is not.
+        // Lane decides color, strength decides alpha weight.
         QColor colour;
         switch (marker.lane) {
             case core::MarkerLane::Downbeat: colour = kAccent;            break;
@@ -1496,7 +1440,7 @@ void TimelineView::paintRhythm(QPainter& p) const {
         p.setPen(QPen(colour, marker.lane == core::MarkerLane::User ? 1.5 : 1.0));
         p.drawLine(QPointF(x, top), QPointF(x, bottom));
 
-        // A tick in the ruler, so the markers are findable without hunting the tracks.
+        // Ruler tick so markers are findable without scanning the tracks.
         p.setPen(QPen(colour, 2.0));
         p.drawLine(QPointF(x, top - 5), QPointF(x, top - 1));
     }
@@ -1588,8 +1532,7 @@ void TimelineView::paintEvent(QPaintEvent*) {
     paintRhythm(p);
     paintPlayhead(p);
 
-    // Where a pending drop would land: the time it snapped to, and the slot in the
-    // stack. Without this you are guessing, and the snap is invisible.
+    // Pending drop: snapped time and target row.
     if (dropRow_ >= 0) {
         const double x = xForTime(dropTime_);
         p.save();
@@ -1714,8 +1657,7 @@ bool TimelineView::event(QEvent* e) {
         }
     }
 
-    // Rhythm markers win over whatever is behind them; they are the thin lines people
-    // will actually wonder about.
+    // Rhythm markers win tooltip priority over whatever is behind them.
     if (comp_ != nullptr && pos.x() >= trackLeft() && !comp_->rhythm.empty()) {
         for (const core::Marker& marker : comp_->rhythm.markers()) {
             if (std::fabs(xForTime(marker.seconds) - pos.x()) > 3.0) {
@@ -1748,12 +1690,8 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
     const QPoint pos = e->position().toPoint();
     const bool additive = e->modifiers().testFlag(Qt::ShiftModifier);
 
-    // The work area strip, before anything else in the header. Its two ends set the range;
-    // the middle drags the whole range without resizing it.
-    //
-    // Handled ahead of the ruler's scrub because they overlap in x and the strip is only
-    // six pixels tall: a click that lands on the work area and scrubs instead is a click
-    // that did the one thing the user was not aiming at.
+    // Work area strip checked before ruler scrub, since they overlap in x. Ends set the
+    // range; the middle drags the whole range.
     if (comp_ != nullptr && pos.x() >= trackLeft() &&
         pos.y() >= metrics::kColumnLabelH &&
         pos.y() < metrics::kColumnLabelH + metrics::kWorkAreaH) {
@@ -1772,8 +1710,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             workGrab_ = WorkGrab::Whole;
             workGrabOffset_ = timeForX(pos.x()) - from;
         } else {
-            // Outside it: start a fresh work area here rather than doing nothing. The
-            // alternative is a control that ignores most of its own strip.
+            // Outside existing range: start a fresh work area here.
             workGrab_ = WorkGrab::End;
             const double at = std::max(0.0, timeForX(pos.x()));
             comp_->workIn = core::TimeValue::seconds(at);
@@ -1788,7 +1725,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
-    // Track side. Layer bars and keyframes both take precedence over scrubbing.
+    // Track side: layer bars and keyframes take precedence over scrubbing.
     if (pos.x() >= trackLeft()) {
         if (pos.y() >= metrics::kColumnHeaderH) {
             const int contentY = pos.y() + scrollY_;
@@ -1848,8 +1785,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
         if (contentY < row.top || contentY >= row.top + row.height) {
             continue;
         }
-        // Group headers: the twirl, and only the twirl. The rest of the row is a label,
-        // and a whole-row hit would fight the right-click menu an effect header owns.
+        // Group headers: only the twirl is clickable (rest is label / right-click menu).
         if (row.kind == RowKind::EffectHeader) {
             if (pos.x() >= groupTwirlLeft() &&
                 pos.x() < groupTwirlLeft() + kGroupTwirlW) {
@@ -1858,17 +1794,15 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // Property rows: the navigator, and only the navigator. Everything else on a
-        // property row is a readout.
+        // Property rows: only the navigator is clickable; rest is a readout.
         if (row.kind == RowKind::Property) {
             Layer* owner = comp_->find(row.layer);
             const int navX = navLeft();
             if (owner == nullptr || pos.x() < navX || pos.x() >= trackLeft()) {
                 return;
             }
-            // Stepping between keys is reading, not editing, so it stays available on a
-            // locked layer. Adding and removing one does not, and that is handled below
-            // at the diamond rather than here.
+            // Stepping between keys works on a locked layer (read-only); add/remove
+            // doesn't — handled below at the diamond.
             Property* prop = nullptr;
             if (row.effect < 0) {
                 if (row.propertyIndex < static_cast<int>(owner->properties.size())) {
@@ -1906,9 +1840,8 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
                 return;
             }
 
-            // The diamond. Adds a key here holding the value the property already has, or
-            // removes the one that is here. Toggling rather than always adding is what
-            // makes it usable as a single control: the same click undoes itself.
+            // The diamond toggles: adds a key at the current value, or removes it if
+            // one's already here.
             const auto existing =
                 std::find_if(prop->keys.begin(), prop->keys.end(),
                              [&](const core::Keyframe& k) {
@@ -1916,7 +1849,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
                                         1e-6;
                              });
             if (owner->locked) {
-                return;  // the diamond is a readout on a locked layer
+                return;  // read-only on a locked layer
             }
             emit editBegan(existing != prop->keys.end() ? QStringLiteral("Remove Keyframe")
                                                         : QStringLiteral("Add Keyframe"));
@@ -1946,7 +1879,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The eye. The compositor has always honoured `enabled`; nothing could set it.
+        // The eye toggle.
         if (pos.x() < kEyeEnd) {
             emit editBegan(QStringLiteral("Hide Layer"));
             layer->enabled = !layer->enabled;
@@ -1956,7 +1889,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // Solo. Same story, except the compositor did not honour it either.
+        // Solo toggle.
         if (pos.x() >= kSoloX && pos.x() < kSoloEnd) {
             emit editBegan(QStringLiteral("Solo Layer"));
             layer->solo = !layer->solo;
@@ -1966,17 +1899,15 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The padlock. Locking a selected layer deselects it, because the selection is
-        // what every keyboard edit acts on and leaving it selected would mean a locked
-        // layer still answering to Delete.
+        // Locking a selected layer also deselects it, since selection drives keyboard
+        // edits (Delete, etc).
         if (pos.x() >= kLockX && pos.x() < kLockEnd) {
             emit editBegan(layer->locked ? QStringLiteral("Unlock Layer")
                                          : QStringLiteral("Lock Layer"));
             layer->locked = !layer->locked;
             emit editEnded();
             if (layer->locked && isSelected(layer->id)) {
-                // Out of the selection, not the whole selection cleared. Locking one of
-                // three selected layers should leave the other two selected.
+                // Only remove this layer, not the whole selection.
                 selected_.erase(std::remove(selected_.begin(), selected_.end(), layer->id),
                                 selected_.end());
                 emit selectionChanged(selected_.empty() ? 0 : selected_.back());
@@ -1987,9 +1918,8 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The eight switches. fx toggles every effect on the layer; the other seven are
-        // drawn and do nothing, and swallow the click rather than falling through to
-        // selecting the layer, which would make an inert switch feel like a misfire.
+        // fx toggles every effect; the other seven switches swallow the click but do
+        // nothing (rather than falling through to layer selection).
         if (const int index = switchAt(pos.x());
             index >= 0 && pos.x() < modeLeft()) {
             if (static_cast<Switch>(index) == Switch::Effects && !layer->locked &&
@@ -2009,8 +1939,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The Parent cell. Parenting has worked in the compositor since the transform
-        // work and there has been no way to reach it.
+        // Parent cell opens the parenting menu.
         const int parentX = parentLeft();
         if (!layer->locked && pos.x() >= parentX && pos.x() < navLeft()) {
             QMenu menu(this);
@@ -2039,10 +1968,8 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
                 action->setChecked(layer->parent.has_value() &&
                                    *layer->parent == candidate.id);
 
-                // Refused here, at the moment it is attempted, which is the only point
-                // where it can be explained to whoever is doing it. The render path
-                // tolerates cycles, but tolerating one is not the same as allowing it to
-                // be created.
+                // Blocked here even though the render path tolerates cycles; UI shouldn't
+                // let you create one.
                 const bool allowed =
                     core::canParentTo(*comp_, layer->id, candidate.id);
                 action->setEnabled(allowed);
@@ -2063,9 +1990,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The Mode cell opens the blend menu. Until now this column displayed a value
-        // with no way to change it, which is the same lie as a mode the compositor
-        // ignored, just from the other end.
+        // Mode cell opens the blend mode menu.
         const int modeX = modeLeft();
         if (!layer->locked && pos.x() >= modeX && pos.x() < modeX + kModeW) {
             QMenu menu(this);
@@ -2105,17 +2030,13 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // Preserve Transparency and Track Matte. Both are drawn as controls and neither
-        // does anything yet, so both swallow the click. Falling through to selecting the
-        // layer would be the app answering a click on a checkbox with something else.
+        // Preserve Transparency / Track Matte: not implemented, but swallow the click.
         if (pos.x() >= preserveLeft() && pos.x() < parentLeft()) {
             return;
         }
 
-        // The keyframe navigator. Previous and next step the playhead; the diamond is a
-        // readout only. On a property row it means "put a key here", but a layer has many
-        // properties and "add a keyframe to the layer" is not a thing, so it does not
-        // pretend to be a button.
+        // Prev/next step the playhead; diamond is readout-only here (a layer has many
+        // properties, so there's no single "add a keyframe to the layer").
         const int navX = navLeft();
         if (layer->keyframeCount() > 0 && pos.x() >= navX && pos.x() < trackLeft()) {
             const int third = kNavW / 3;
@@ -2131,9 +2052,7 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // The speaker mutes. Only hit-testable where one is actually drawn, so clicking
-        // the empty slot on a silent layer does nothing rather than toggling a switch the
-        // user cannot see.
+        // Speaker mute; only hit-testable where the dot is actually drawn.
         if (pos.x() >= kAudioX && pos.x() < kAudioEnd && peaksFor(*layer) != nullptr) {
             emit editBegan(QStringLiteral("Mute Layer"));
             layer->audioEnabled = !layer->audioEnabled;
@@ -2150,15 +2069,12 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
             return;
         }
 
-        // A locked layer cannot be selected. Everything that edits a layer works off the
-        // selection, so refusing it here is one guard instead of one per edit.
+        // Locked layers can't be selected (every edit works off the selection).
         if (layer->locked) {
             return;
         }
 
-        // Plain click replaces, cmd-click toggles, shift-click extends. Shift on the
-        // track side already means additive keyframe selection, and these never meet:
-        // that path returns inside the `x >= trackLeft()` branch long before here.
+        // Plain click replaces, cmd-click toggles, shift-click extends.
         const SelectMode mode =
             e->modifiers().testFlag(Qt::ControlModifier) ||
                     e->modifiers().testFlag(Qt::MetaModifier)
@@ -2197,9 +2113,7 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
             case WorkGrab::None:
                 break;
         }
-        // Dragging one end past the other swaps them rather than refusing. Pulling the
-        // start past the end is a perfectly clear intention and stopping dead at the
-        // crossing point is the app arguing with it.
+        // Dragging one end past the other swaps them rather than clamping.
         comp_->workIn = core::TimeValue::seconds(std::min(from, to));
         comp_->workOut = core::TimeValue::seconds(std::max(from, to));
         update();
@@ -2211,30 +2125,26 @@ void TimelineView::mouseMoveEvent(QMouseEvent* e) {
         if (layer == nullptr) {
             return;
         }
-        // Holding a modifier suspends snapping for one drag, for the times the snap is
-        // fighting you rather than helping.
+        // Alt suspends snapping for one drag.
         const bool suspend = e->modifiers().testFlag(Qt::AltModifier);
         const auto snap = [&](double t) {
             return suspend ? t : snapTime(t, dragLayer_);
         };
 
-        // A layer with no duration cannot be grabbed again, so trims stop a frame short
-        // rather than collapsing.
+        // Trims stop a frame short of zero length, not at it.
         const double minimum = 1.0 / std::max(1.0, comp_->fps);
 
         switch (dragMode_) {
             case DragMode::MoveLayer: {
                 const double length = dragOriginalOut_ - dragOriginalIn_;
                 double in = snap(timeForX(pos.x()) - dragGrabOffset_);
-                // Snap the tail too: butting a clip against the next one is as common
-                // as lining its head up.
+                // Snap the tail too, so butting against the next clip works from either end.
                 const double byTail = snap(in + length) - length;
                 if (!suspend && std::fabs(byTail - in) > 1e-9 &&
                     std::fabs(xForTime(byTail) - xForTime(in)) < 8.0) {
                     in = byTail;
                 }
-                // Only a floor. Dragging a layer past the end of the composition is
-                // allowed; the composition grows to meet it on release.
+                // Floor only; dragging past comp end is allowed (comp grows on release).
                 in = std::max(0.0, in);
                 layer->inPoint = core::TimeValue::seconds(in);
                 layer->outPoint = core::TimeValue::seconds(in + length);
@@ -2300,9 +2210,8 @@ bool carriesMedia(const QMimeData* data) {
 
 }  // namespace
 
-// Which layer a drop at this height would land on, or 0 for none. Effects go onto a
-// specific layer rather than into the composition, so an effect dropped on empty space is
-// refused rather than guessed at.
+// Which layer a drop at this height would land on, or 0. Effects target a specific
+// layer, so a drop on empty space is refused rather than guessed at.
 core::LayerId TimelineView::layerAtDrop(const QPoint& pos) const {
     if (comp_ == nullptr || pos.y() < metrics::kColumnHeaderH) {
         return 0;
@@ -2311,9 +2220,7 @@ core::LayerId TimelineView::layerAtDrop(const QPoint& pos) const {
     for (const Row& row : rows_) {
         if (row.kind == RowKind::Layer && contentY >= row.top &&
             contentY < row.top + row.height) {
-            // Applying an effect is an edit, so a locked layer is not a target. Returning
-            // nothing here also means the drop highlight never lights up on it, which is
-            // the refusal arriving before the release rather than after.
+            // Locked layers aren't valid targets, so the drop highlight never shows on one.
             const core::Layer* layer = comp_->find(row.layer);
             return (layer != nullptr && layer->locked) ? 0 : row.layer;
         }
@@ -2337,9 +2244,7 @@ void TimelineView::dragMoveEvent(QDragMoveEvent* e) {
         return;
     }
 
-    // An effect lands ON a layer, not at a time, so it highlights the row under the
-    // cursor and offers no drop position. Accepting only over a real layer means an
-    // effect dropped on empty space is refused rather than silently going nowhere.
+    // Effects land on a layer, not a time; highlight the row and refuse empty space.
     if (carriesEffect(e->mimeData())) {
         const core::LayerId over = layerAtDrop(e->position().toPoint());
         dropEffectLayer_ = over;
@@ -2357,11 +2262,9 @@ void TimelineView::dragMoveEvent(QDragMoveEvent* e) {
     }
     const QPoint pos = e->position().toPoint();
 
-    // Snapped, so a dropped clip lands on a syllable or against its neighbour rather
-    // than wherever the cursor happened to be.
     dropTime_ = std::max(0.0, snapTime(timeForX(pos.x()), 0));
 
-    // Vertical position picks where in the stack it goes, the way footage drops in AE.
+    // Vertical position picks the stack slot, AE-style.
     dropRow_ = 0;
     const int contentY = pos.y() + scrollY_;
     int index = 0;
@@ -2417,9 +2320,7 @@ void TimelineView::dropEvent(QDropEvent* e) {
 void TimelineView::mouseReleaseEvent(QMouseEvent*) {
     if (workGrab_ != WorkGrab::None) {
         workGrab_ = WorkGrab::None;
-        // A work area dragged to nothing is cleared rather than left as a zero-length
-        // range, so `hasWorkArea` goes back to false and everything treats it as "all of
-        // it" again. A range of no length is not a smaller selection, it is no selection.
+        // A zero-length work area is cleared, not kept, so hasWorkArea() goes back to false.
         if (comp_ != nullptr && !comp_->hasWorkArea()) {
             comp_->workIn = core::TimeValue::seconds(0.0);
             comp_->workOut = core::TimeValue::seconds(0.0);
@@ -2433,11 +2334,8 @@ void TimelineView::mouseReleaseEvent(QMouseEvent*) {
         dragMode_ = DragMode::None;
         dragLayer_ = 0;
 
-        // Growth waits for the release rather than tracking the drag. If the composition
-        // stretched continuously while you pulled, the whole timeline would rescale under
-        // the cursor and the bar would shrink away from the mouse as you dragged it right,
-        // which feels like the app fighting you. This happens before editEnded so it lands
-        // inside the same undo step as the move that caused it.
+        // Growth waits for release, not tracked live (else the timeline would rescale
+        // under the cursor mid-drag). Before editEnded so it's the same undo step.
         if (comp_ != nullptr && comp_->growToFit()) {
             durationChanged();
             emit compositionResized(comp_->duration);
@@ -2452,21 +2350,17 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
     if (comp_ == nullptr) {
         return;
     }
-    // Right clicking a layer selects it first. Acting on whatever happened to be selected
-    // before, while the user is pointing at something else, is how people delete the
-    // wrong thing. Works from either side of the panel: the name column and the bar are
-    // the same row.
+    // Right click selects the target first, so a menu action doesn't act on a stale
+    // selection.
     if (e->pos().y() >= metrics::kColumnHeaderH) {
         const int contentY = e->pos().y() + scrollY_;
 
-        // An effect's own header row gets its own menu. Right clicking an effect and
-        // being offered "delete layer" is the wrong answer to an obvious question.
+        // An effect header gets its own menu, not the layer's.
         for (const Row& row : rows_) {
             if (row.kind == RowKind::EffectHeader && row.effect != kTransformGroup &&
                 contentY >= row.top && contentY < row.top + row.height) {
-                // Right-clicking inside an existing multi-selection keeps it, so "Delete
-                // Layer" on three selected layers deletes three. Right-clicking outside it
-                // selects just that one, which is what every list in every app does.
+                // Right-click inside an existing multi-selection keeps it; outside it
+                // selects just the one row.
                 if (!isSelected(row.layer)) {
                     selectLayer(row.layer);
                     emit selectionChanged(row.layer);
@@ -2482,9 +2376,7 @@ void TimelineView::contextMenuEvent(QContextMenuEvent* e) {
                 continue;
             }
             if (contentY >= row.top && contentY < row.top + row.height) {
-                // Right-clicking inside an existing multi-selection keeps it, so "Delete
-                // Layer" on three selected layers deletes three. Right-clicking outside it
-                // selects just that one, which is what every list in every app does.
+                // Same multi-selection preservation rule as above.
                 if (!isSelected(row.layer)) {
                     selectLayer(row.layer);
                     emit selectionChanged(row.layer);
@@ -2549,7 +2441,7 @@ protected:
         QPainter p(this);
         p.fillRect(rect(), kSubToolbar);
 
-        // Timecode is the app's primary readout, so it gets the accent colour.
+        // Timecode is the primary readout: accent color.
         p.setFont(monoFont(type::kTimeReadout));
         p.setPen(kAccent);
 
@@ -2596,9 +2488,7 @@ TimelinePanel::TimelinePanel(QWidget* parent) : QWidget(parent) {
     bodyLayout->addWidget(view_, 1);
     bodyLayout->addWidget(scroll_);
 
-    // Bottom bar, laid out like AE's: zoom slider under the layer column, time scrollbar
-    // under the track it actually scrolls. A full-width scrollbar would imply it scrolls
-    // the layer names too.
+    // Zoom slider under the layer column, time scrollbar under the track (AE layout).
     zoom_ = new QSlider(Qt::Horizontal, this);
     zoom_->setRange(0, 1000);
     zoom_->setToolTip(QStringLiteral("Zoom the timeline"));
@@ -2606,12 +2496,7 @@ TimelinePanel::TimelinePanel(QWidget* parent) : QWidget(parent) {
 
     timeScroll_ = new QScrollBar(Qt::Horizontal, this);
 
-    // Zoom slider centred in the bar, time scrollbar on the right, as AE lays it out.
-    //
-    // The 2:1:1 stretch is what actually centres it. The scrollbar on the right has to be
-    // balanced by twice as much space on the left, or "equal spacers either side of the
-    // slider" would park it at a quarter of the way across and only look centred if the
-    // scrollbar were not there.
+    // 2:1:1 stretch centers the zoom slider given the scrollbar's width on the right.
     auto* timeRow = new QWidget(this);
     auto* timeLayout = new QHBoxLayout(timeRow);
     timeLayout->setContentsMargins(12, 0, 12, 0);
@@ -2740,6 +2625,7 @@ void TimelinePanel::selectLayer(core::LayerId layer) { view_->selectLayer(layer)
 void TimelinePanel::clearSelection() { view_->clearSelection(); }
 
 void TimelinePanel::revealAnimated(core::LayerId layer) { view_->revealAnimated(layer); }
+void TimelinePanel::revealAudioLevel(core::LayerId layer) { view_->revealAudioLevel(layer); }
 void TimelinePanel::toggleExpanded(core::LayerId layer) { view_->toggleExpanded(layer); }
 
 void TimelinePanel::setAudioPeaks(const TimelineView::AudioPeaks* peaks) {

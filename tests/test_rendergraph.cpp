@@ -1,9 +1,5 @@
-// The render graph: what a frame is made of, described before any of it is drawn.
-//
-// Everything here is about the hash, because the hash is the whole product. A hash that
-// changes when the picture did not means the cache never hits. A hash that stays the same
-// when the picture DID change means the cache shows the wrong frame, which is worse than
-// having no cache at all: the app is confidently wrong and the user has no idea why.
+// Render graph hashing: a false-positive miss just costs perf, a false-positive hit shows
+// the wrong frame silently.
 
 #include <cstdio>
 #include <string>
@@ -49,8 +45,7 @@ void the_same_frame_hashes_the_same_twice() {
     check(s.hashAt(1.0) != 0, "and it is not trivially zero");
 }
 
-// Time is quantised to a frame index, because a cache keyed on a double would miss on the
-// difference between 1.0 and 0.9999999999 and every scrub would be a miss.
+// Time quantises to a frame index; a double-keyed cache would miss on float noise.
 void times_inside_one_frame_are_the_same_frame() {
     Scene s;
     check(s.hashAt(1.0) == s.hashAt(1.0 + 1.0 / 90.0),
@@ -58,10 +53,8 @@ void times_inside_one_frame_are_the_same_frame() {
     check(s.at(1.0).frame == s.at(1.0 + 1.0 / 90.0).frame, "and reports the same index");
     check(s.at(1.0).frame + 1 == s.at(1.0 + 1.0 / 30.0).frame, "the next frame is next");
 
-    // And a frame that looks identical to the one before it HASHES identically, even
-    // though it is a different frame. That is not a bug to be fixed, it is the entire
-    // point: two static solids held for two seconds should render once and be reused
-    // sixty times. Only a frame where something actually moved has to be redrawn.
+    // Identical-looking frames must hash identically even at different frame indices,
+    // so static content renders once and is reused.
     check(s.hashAt(1.0) == s.hashAt(1.0 + 1.0 / 30.0),
           "nothing moved, so the next frame is the same picture");
 
@@ -75,8 +68,7 @@ void times_inside_one_frame_are_the_same_frame() {
           "once something is animated, consecutive frames differ");
 }
 
-// The point of the whole design: a transform belongs to the composite, not to the layer,
-// so moving a layer must not invalidate its effect passes.
+// Transform belongs to the composite, not the layer; moving a layer keeps its own hash.
 void moving_a_layer_leaves_its_own_output_alone() {
     Scene s;
     const engine::RenderGraph before = s.at(1.0);
@@ -94,8 +86,7 @@ void moving_a_layer_leaves_its_own_output_alone() {
           "but the finished frame did, so the composite's did");
 }
 
-// Changing an effect parameter has to change that layer's output hash, or the cache hands
-// back a stale texture and the user watches a slider do nothing.
+// An effect parameter change must invalidate the layer's output hash.
 void changing_an_effect_parameter_changes_the_layer() {
     Scene s;
     core::EffectInstance fx;
@@ -118,8 +109,7 @@ void changing_an_effect_parameter_changes_the_layer() {
           "a parameter change changes the layer's output");
 }
 
-// A disabled effect is not in the picture, so it is not in the graph. Otherwise turning
-// one off would still cost a pass.
+// A disabled effect must not appear in the graph (it shouldn't cost a pass).
 void a_disabled_effect_is_absent_from_the_graph() {
     Scene s;
     core::EffectInstance fx;
@@ -136,8 +126,7 @@ void a_disabled_effect_is_absent_from_the_graph() {
           "and the layer's output is its source again");
 }
 
-// Everything below here is a hash that must move. Each one is a way the picture can change
-// while a naive key would not notice.
+// Each of these changes the picture in a way a naive key would miss.
 void every_visible_change_moves_the_frame_hash() {
     {
         Scene s;
@@ -183,12 +172,10 @@ void every_visible_change_moves_the_frame_hash() {
     }
 }
 
-// Stacking order changes the picture without changing any layer, so it has to be in the
-// composite's hash and not only in the set of layers.
+// Stacking order must be part of the composite's hash, not just the set of layers.
 void restacking_changes_the_frame() {
     Scene s;
-    // Two layers that look different, because swapping two IDENTICAL layers genuinely
-    // produces the same picture and the hash is right to say so.
+    // Layers must differ; swapping identical layers would legitimately hash the same.
     s.layer(s.a).solidColor = core::Value::rgba(1.0, 0.0, 0.0, 1.0);
     s.layer(s.b).solidColor = core::Value::rgba(0.0, 0.0, 1.0, 1.0);
     s.layer(s.b).blend = core::BlendMode::Screen;
@@ -198,8 +185,7 @@ void restacking_changes_the_frame() {
     check(s.hashAt(1.0) != was, "swapping two layers changes the frame");
 }
 
-// An empty composition is still a picture: the letterbox and the frame. It is as cacheable
-// as any other, so it gets a node rather than an absent root.
+// An empty composition is still cacheable; it gets a node rather than an absent root.
 void an_empty_composition_still_has_a_root() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
@@ -209,9 +195,7 @@ void an_empty_composition_still_has_a_root() {
     check(g.nodes.size() == 1, "and nothing under it");
 }
 
-// Supplied content the engine cannot make itself, currently text. The graph cannot hash
-// pixels it has never seen, so the caller supplies a number that moves when the raster
-// would.
+// External content (currently text) can't be hashed directly; caller supplies a key instead.
 void an_external_key_reaches_the_frame_hash() {
     Scene s;
     engine::ExternalKeys keys;
@@ -222,8 +206,7 @@ void an_external_key_reaches_the_frame_hash() {
     check(with != changed, "re-rasterised text is a different frame");
 }
 
-// Deliberately NOT std::hash: it may differ between runs and library versions, which is
-// harmless for a hash map and fatal for a cache written to disk.
+// Not std::hash: it can vary between runs/versions, fatal for an on-disk cache.
 void the_hash_is_stable_and_not_std_hash() {
     const engine::NodeHash a = engine::hashString("core.blur.gaussian", 1469598103934665603ULL);
     check(a == 5641052493809917232ULL,

@@ -7,11 +7,8 @@
 namespace ruby::script {
 namespace {
 
-// Lua's allocator, with a ceiling.
-//
-// Refusing an allocation is how you say no to memory the way the count hook says no to
-// time. Lua handles a null return from here properly: it raises a normal "not enough
-// memory" error, which pcall catches like anything else.
+// Lua's allocator with a memory ceiling; a null return raises Lua's normal OOM error,
+// caught by pcall like any other.
 void* cappedAlloc(void* ud, void* ptr, std::size_t osize, std::size_t nsize) {
     auto* impl = static_cast<Sandbox::Impl*>(ud);
     const std::size_t had = (ptr != nullptr) ? osize : 0;
@@ -39,9 +36,7 @@ Sandbox::Impl* implOf(lua_State* L) {
     return impl;
 }
 
-// Runs every `budget` instructions. There is no way to ask Lua "have you been too long";
-// the count hook IS the mechanism, and erroring from inside it is how you stop a script
-// that will not stop itself.
+// Runs every `budget` instructions; erroring here is the only way to stop a runaway script.
 void countHook(lua_State* L, lua_Debug*) {
     if (Sandbox::Impl* impl = implOf(L); impl != nullptr) {
         impl->exhausted = true;
@@ -49,10 +44,8 @@ void countHook(lua_State* L, lua_Debug*) {
     luaL_error(L, "expression ran too long");
 }
 
-// The libraries an expression may see.
-//
-// io, os, package, debug and coroutine are simply never opened. Not opened and then
-// cleared: never opened. There is nothing to find and nothing to miss.
+// io, os, package, debug, coroutine are never opened (not opened-then-cleared) — nothing
+// to find.
 void openSafeLibraries(lua_State* L) {
     static const luaL_Reg kSafe[] = {
         {LUA_GNAME, luaopen_base},
@@ -66,16 +59,10 @@ void openSafeLibraries(lua_State* L) {
         lua_pop(L, 1);
     }
 
-    // The base library brings a few things that reach outside or defeat the point of the
-    // rest, so they go. `load` and `dofile` would let a script build new code at runtime,
-    // which makes every guarantee above conditional on what that code turns out to be.
-    // `collectgarbage` lets a script stall the process without executing many
-    // instructions, which walks around the budget rather than through it.
-    //
-    // `_G` goes too, and that one is subtle. Every run gets a fresh environment whose
-    // reads fall through to the real globals, so a bare `wiggle = f` lands harmlessly in
-    // the throwaway table. But `_G.wiggle = f` names the real table explicitly and walks
-    // straight past that, clobbering wiggle for every other expression in the project.
+    // load/dofile would let scripts run new code at runtime; collectgarbage can stall
+    // the process without tripping the instruction budget. `_G` is removed too: it names
+    // the real global table directly, bypassing the fresh per-run environment that a
+    // bare assignment falls into.
     for (const char* name : {"dofile", "loadfile", "load", "loadstring", "require",
                              "collectgarbage", "print", "rawequal", "rawlen",
                              "rawget", "rawset", "_G"}) {
@@ -83,9 +70,8 @@ void openSafeLibraries(lua_State* L) {
         lua_setglobal(L, name);
     }
 
-    // Determinism. `math.random` without a seed differs run to run, and with a seed it
-    // still differs from a render on another machine. Expressions get a seeded generator
-    // built for the purpose later; until then there is none, which is honest.
+    // math.random is nondeterministic across runs/machines; expressions get a seeded
+    // generator instead (elsewhere).
     lua_getglobal(L, LUA_MATHLIBNAME);
     for (const char* name : {"random", "randomseed"}) {
         lua_pushnil(L);
@@ -102,12 +88,9 @@ Sandbox::Impl::~Impl() {
     }
 }
 
-// Compiles once and remembers it. Compiling per frame would cost more than running.
-//
-// Tries `return (source)` first so a bare expression like `wiggle(30, 10)` works, then
-// falls back to the source as written so a multi-line script with its own `return` also
-// works. That ordering matters: the wrapped form is what almost every expression is, and
-// trying it second would mean every one of them compiles twice.
+// Compiles once and caches by source. Tries `return (source)` first (bare expressions),
+// falling back to raw source (multi-line scripts with their own return) — that order
+// avoids double-compiling the common case.
 int Sandbox::Impl::chunkFor(const std::string& source, std::string* error) {
     if (const auto it = chunks.find(source); it != chunks.end()) {
         return it->second;
@@ -160,8 +143,8 @@ void Sandbox::setInputs(double time, const core::Value& value, std::uint64_t see
     impl_->inputs.value = value;
     impl_->inputs.seed = seed;
 
-    // `time` and `value` are globals rather than function calls because that is what they
-    // are in After Effects, and a pasted expression saying `value + 20` has to work.
+    // Globals, not functions, because that's what they are in AE — `value + 20` must
+    // work as pasted.
     lua_pushnumber(impl_->L, time);
     lua_setglobal(impl_->L, "time");
     pushValue(impl_->L, value);
@@ -187,8 +170,8 @@ void Sandbox::set(const char* name, const core::Value& value) {
         lua_setglobal(L, name);
         return;
     }
-    // A vector is a table indexed from 1, because that is what Lua code will expect. AE's
-    // expressions index from 0; the paste shim is where that gets reconciled, not here.
+    // Indexed from 1 (Lua convention); AE's 0-based indexing is reconciled in the paste
+    // shim, not here.
     lua_createtable(L, value.count, 0);
     for (int i = 0; i < value.count; ++i) {
         lua_pushnumber(L, value.c[static_cast<std::size_t>(i)]);
@@ -212,23 +195,16 @@ Sandbox::Outcome Sandbox::evaluate(const std::string& source) {
 
     lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
 
-    // Every run gets a FRESH environment, and this is the most important line in the file.
-    //
-    // Without it, an expression that writes a global writes it for the whole sandbox:
-    // `wiggle = function() return 999 end` in one preset silently replaces wiggle for
-    // every other expression in the project. That is not a way out of the process, it is
-    // a way to corrupt everybody else's output, which is worse.
-    //
-    // The fresh table falls through to the real globals for reads, so time, value, wiggle
-    // and the rest are all visible. Writes land in the throwaway table and go with it.
+    // Fresh environment per run: reads fall through to real globals, writes land in a
+    // throwaway table. Without this, a global write in one expression (e.g. redefining
+    // wiggle) would corrupt every other expression in the project.
     lua_newtable(L);                       // env
     lua_newtable(L);                       // metatable
     lua_pushglobaltable(L);
     lua_setfield(L, -2, "__index");
 
-    // And hide this metatable, or `getmetatable(_ENV).__index` hands back the real global
-    // table and everything above is undone by one line. Same fix as the vector type: the
-    // pattern is that anything holding a reference to something shared needs it.
+    // Hidden, or `getmetatable(_ENV).__index` exposes the real global table and undoes
+    // the sandboxing above.
     lua_pushliteral(L, "environment");
     lua_setfield(L, -2, "__metatable");
 
@@ -237,9 +213,8 @@ Sandbox::Outcome Sandbox::evaluate(const std::string& source) {
 
     const int status = lua_pcall(L, 0, 1, 0);
 
-    // Always cleared, including on the error path. A hook left installed would fire during
-    // the next evaluation with a stale count and kill an expression that had done nothing
-    // wrong, which is the kind of bug that looks random.
+    // Cleared even on error — a stale hook would fire on the next evaluation and kill an
+    // unrelated expression.
     lua_sethook(L, nullptr, 0, 0);
 
     if (status != LUA_OK) {
@@ -250,10 +225,8 @@ Sandbox::Outcome Sandbox::evaluate(const std::string& source) {
     }
 
     if (readValue(L, -1, out.value)) {
-        // A non-finite result is refused rather than handed on. `0/0` is a NaN that
-        // spreads through every calculation it touches and ends up as a layer that
-        // silently does not draw, with nothing anywhere saying why. Falling back to the
-        // keyframed value is both recoverable and visible.
+        // Non-finite results are refused, not propagated — NaN would silently spread
+        // and produce a layer that just doesn't draw.
         bool finite = true;
         for (int i = 0; i < out.value.count; ++i) {
             if (!std::isfinite(out.value.c[static_cast<std::size_t>(i)])) {

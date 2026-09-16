@@ -1,8 +1,5 @@
-// Tests for text layout and rasterisation.
-//
-// Needs a QGuiApplication for the font stack, and a machine with fonts. Reports 77 and is
-// recorded as SKIPPED where there is no platform plugin, so headless CI does not fail on
-// something that is not a code problem.
+// Text layout and rasterisation. Needs fonts + QGuiApplication; reports 77/SKIPPED
+// without a platform plugin so headless CI doesn't fail on an environment issue.
 
 #include <QGuiApplication>
 #include <QImage>
@@ -35,8 +32,7 @@ core::Layer textLayer(const char* text) {
     return layer;
 }
 
-// The whole reason layout runs per character: one path per glyph, each individually
-// addressable. Everything an animator needs hangs off this being true.
+// Layout must produce one addressable path per glyph.
 void layout_produces_one_path_per_visible_character() {
     const std::vector<ui::LaidOutGlyph> glyphs = ui::layOutText(textLayer("AB C"), 1.0);
     check(glyphs.size() == 3, "three visible glyphs; the space produces none");
@@ -50,8 +46,7 @@ void layout_produces_one_path_per_visible_character() {
           "glyphs advance left to right");
 }
 
-// Indices are what a selector counts with. If they do not match the source string, an
-// animator driven by character index animates the wrong letters.
+// Glyph indices must match the source string's character indices.
 void indices_line_up_with_the_source_string() {
     const std::vector<ui::LaidOutGlyph> glyphs = ui::layOutText(textLayer("ab cd"), 1.0);
     check(glyphs.size() == 4, "four visible glyphs");
@@ -124,8 +119,7 @@ void rasterising_produces_premultiplied_pixels_with_ink() {
     check(!empty.valid(), "empty text rasterises to nothing rather than a blank image");
 }
 
-// A missing font must be reported, not silently substituted. A project that opens in the
-// wrong typeface with no warning is worse than one that refuses.
+// A missing font must be reported, not silently substituted.
 void a_missing_font_is_reported() {
     core::Layer layer = textLayer("Hi");
     layer.fontFamily = "ThisFontDoesNotExistAnywhere12345";
@@ -148,8 +142,7 @@ void scale_changes_the_rendered_size() {
 }
 
 
-// Layout steps by grapheme cluster, not UTF-16 code unit. Iterating QChar split an emoji
-// into two halves of a broken glyph and separated a combining accent from its letter.
+// Layout steps by grapheme cluster, not UTF-16 code unit (regression: QChar iteration split emoji/accents).
 void one_glyph_per_user_perceived_character() {
     check(ui::layOutText(textLayer("\xF0\x9F\x8E\xAC"), 1.0).size() == 1,
           "an emoji is one glyph, not two surrogate halves");
@@ -163,8 +156,7 @@ void one_glyph_per_user_perceived_character() {
           "a letter and its combining accent are one glyph, not two");
 }
 
-// Colour emoji are bitmaps in the font, so QPainterPath::addText produces no outline for
-// them. They used to rasterise to an empty 4x4 image and simply not appear.
+// Colour emoji are font bitmaps with no outline path; regression: used to rasterise empty.
 void emoji_actually_put_pixels_down() {
     const auto inked = [](const ui::TextRaster& r) {
         int count = 0;
@@ -186,7 +178,7 @@ void emoji_actually_put_pixels_down() {
     check(inked(mixed) > inked(emoji), "text plus emoji draws more than emoji alone");
 }
 
-// Too big is not the same as empty, and both used to be an invalid raster.
+// Too-large and empty both used to produce an invalid raster indistinguishably.
 void oversized_text_says_so_instead_of_vanishing() {
     core::Layer huge = textLayer("x");
     huge.text = std::string(2000, 'W');
@@ -198,8 +190,7 @@ void oversized_text_says_so_instead_of_vanishing() {
     check(!empty.valid() && !empty.tooLarge, "empty text is empty, not too large");
 }
 
-// Degenerate inputs used to produce a smear of pixels, which looks like text that rendered
-// and went wrong rather than an input that was refused.
+// Degenerate inputs used to produce a smear of pixels instead of a clean rejection.
 void degenerate_inputs_are_clamped() {
     for (const double scale : {0.0, -1.0}) {
         const ui::TextRaster r = ui::rasteriseText(textLayer("x"), scale);
@@ -211,8 +202,7 @@ void degenerate_inputs_are_clamped() {
         check(ui::rasteriseText(layer, 1.0).valid(), "so does a non-positive font size");
     }
 
-    // A negative stroke drew nothing, correctly, but fed a negative number into the
-    // padding, which shrank the image and clipped the glyphs it was meant to protect.
+    // Regression: negative stroke fed negative padding, shrinking and clipping the image.
     core::Layer negative = textLayer("stroke");
     negative.strokeWidth = -5.0;
     core::Layer none = textLayer("stroke");

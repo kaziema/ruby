@@ -1,8 +1,5 @@
-// The After Effects compatible surface: what an expression can actually say.
-//
-// The names and behaviours here are AE's, on purpose. This audience does not write
-// expressions from scratch, they paste them from tutorials and Discord, and a `wiggle`
-// that takes its arguments in a different order is worse than no wiggle at all.
+// AE-compatible expression surface. Names/behavior deliberately match AE's since users
+// paste expressions from tutorials rather than write them fresh.
 
 #include "SandboxImpl.h"
 
@@ -20,15 +17,12 @@ Inputs* inputsOf(lua_State* L) {
 }
 
 // --- Deterministic noise -----------------------------------------------------
-//
-// The whole reason math.random is absent. A render has to be reproducible: the same
-// project on the same frame must give the same pixels tomorrow, on another machine, and
-// on a render farm. So the "randomness" is a pure function of the seed and the time, and
-// nothing else.
+// Pure function of seed+time so renders reproduce across machines/render farms
+// (why math.random is absent).
 
 std::uint64_t mix(std::uint64_t x) {
-    // splitmix64. Cheap, and scatters adjacent seeds well, which matters because
-    // consecutive layer ids are the common case and must not wiggle in sympathy.
+    // splitmix64: cheap, scatters adjacent seeds well (consecutive layer ids are
+    // common and must not wiggle in sync).
     x += 0x9E3779B97F4A7C15ULL;
     x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
     x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
@@ -41,9 +35,8 @@ double noiseAt(std::uint64_t seed, std::int64_t n) {
     return (static_cast<double>(h >> 11) * 0x1.0p-53) * 2.0 - 1.0;
 }
 
-// Smooth value noise. Smoothstep between integer samples rather than linear, because
-// linear interpolation gives a visible kink at every whole step, and a wiggle that ticks
-// is a wiggle that looks like a bug.
+// Smoothstep, not linear, between integer samples — linear gives a visible kink at
+// each step.
 double noise(std::uint64_t seed, double t) {
     const double floored = std::floor(t);
     const double frac = t - floored;
@@ -60,8 +53,8 @@ core::Value* checkVec(lua_State* L, int index) {
     return static_cast<core::Value*>(luaL_testudata(L, index, kVecMeta));
 }
 
-// Reads either a vector or a plain number as a value. Lets every operator below accept
-// `v * 2` as readily as `v * other`, which is what AE expressions assume.
+// Accepts a vector or plain number, so `v * 2` works like `v * other` as AE expressions
+// assume.
 bool coerce(lua_State* L, int index, core::Value& out) {
     if (const core::Value* v = checkVec(L, index); v != nullptr) {
         out = *v;
@@ -80,8 +73,8 @@ void pushVec(lua_State* L, const core::Value& value) {
     luaL_setmetatable(L, kVecMeta);
 }
 
-// Applies `op` component by component, broadcasting a scalar across all components. The
-// result keeps the wider of the two counts so `vec2 + 5` is still a vec2.
+// Applies `op` component-wise, broadcasting scalars; result count is the wider of the
+// two so `vec2 + 5` stays a vec2.
 int arithmetic(lua_State* L, double (*op)(double, double)) {
     core::Value a;
     core::Value b;
@@ -121,9 +114,8 @@ int vecUnm(lua_State* L) {
     return 1;
 }
 
-// Indexed from 1, like everything else in Lua. AE indexes from 0; the paste shim is where
-// that gets reconciled, because doing it here would make every hand-written expression
-// disagree with the rest of the language.
+// Indexed from 1 (Lua convention); AE's 0-based indexing is reconciled in the paste
+// shim, not here.
 int vecIndex(lua_State* L) {
     const core::Value* v = checkVec(L, 1);
     if (v == nullptr) {
@@ -208,10 +200,8 @@ int makeVec(lua_State* L) {
 
 // --- The expression functions ------------------------------------------------
 
-// wiggle(freq, amp [, octaves [, ampMult [, t]]])
-//
-// AE's argument order and defaults. Applied to `value`, per component, each component on
-// its own seed so x and y move independently rather than in lockstep.
+// wiggle(freq, amp [, octaves [, ampMult [, t]]]) — AE's arg order/defaults. Each
+// component gets its own seed so x/y don't move in lockstep.
 int wiggle(lua_State* L) {
     Inputs* in = inputsOf(L);
     if (in == nullptr) {
@@ -247,8 +237,8 @@ double linearMap(double t, double tMin, double tMax, double a, double b) {
         return t <= tMin ? a : b;
     }
     const double f = (t - tMin) / (tMax - tMin);
-    // Clamped at both ends, as AE's linear() is. An unclamped remap keeps travelling past
-    // its endpoints, which is almost never what someone animating a fade wants.
+    // Clamped at both ends, matching AE's linear() — unclamped would overshoot past a
+    // fade's endpoints.
     if (f <= 0.0) return a;
     if (f >= 1.0) return b;
     return a + (b - a) * f;
@@ -331,12 +321,9 @@ int length(lua_State* L) {
     return 1;
 }
 
-// --- loopOut / loopIn --------------------------------------------------------
-//
-// These read the animation they are attached to, which is why the whole property is
-// handed in rather than just the expression's text. They are also the single most pasted
-// AE expression after wiggle: `loopOut()` on a two-keyframe move is how most looping
-// motion in a short-form edit is made.
+// --- loopOut / loopIn ---------------------------------------------------------
+// Reads the animation they're attached to, hence the whole property is passed in, not
+// just expression text.
 
 enum class LoopKind { Cycle, PingPong, Offset, Continue };
 
@@ -381,9 +368,8 @@ int loop(lua_State* L, bool outward) {
     const core::Property& prop = *in->property;
     const core::TimeContext& ctx = *in->ctx;
 
-    // Fewer than two keyframes is not an error, it just cannot loop. Returning the value
-    // unchanged is what AE does and means `loopOut()` can sit on a property while you are
-    // still keyframing it, rather than erroring until you finish.
+    // <2 keyframes can't loop but isn't an error; returning unchanged matches AE and
+    // lets loopOut() sit on a property mid-keyframing.
     if (prop.keys.size() < 2) {
         pushValue(L, in->value);
         return 1;
@@ -395,8 +381,8 @@ int loop(lua_State* L, bool outward) {
     const double firstKey = to_seconds(prop.keys.front().time, ctx);
     const double lastKey = to_seconds(prop.keys.back().time, ctx);
 
-    // numKeyframes limits how much of the animation participates, counted from the end
-    // for loopOut and from the start for loopIn. Zero means all of it.
+    // Limits how much of the animation participates: from the end for loopOut, from the
+    // start for loopIn; 0 means all of it.
     double from = firstKey;
     double to = lastKey;
     if (requested > 0 && requested < static_cast<int>(prop.keys.size())) {
@@ -422,9 +408,8 @@ int loop(lua_State* L, bool outward) {
     const double delta = outward ? t - edge : edge - t;
 
     if (kind == LoopKind::Continue) {
-        // Carry on at the speed of the last segment rather than looping at all. Sampled
-        // over a small step because the property already knows how to interpolate, and
-        // duplicating its easing here would drift from it.
+        // Continues at the last segment's speed rather than looping; sampled via a small
+        // step to reuse the property's own interpolation.
         const double step = 1.0 / 60.0;
         const core::Value a = prop.evaluate(outward ? edge - step : edge + step, ctx);
         const core::Value b = prop.evaluate(edge, ctx);
@@ -435,11 +420,9 @@ int loop(lua_State* L, bool outward) {
     const double cycles = std::floor(delta / period);
     double phase = delta - cycles * period;
 
-    // The FIRST pass past the end is the one that runs backwards: the animation reaches
-    // its last keyframe and comes straight back. So the reflected passes are the even
-    // ones, counting the first as zero. Getting this the wrong way round still looks like
-    // a ping-pong at the midpoint, which is exactly why it needs a test that samples
-    // somewhere else.
+    // First pass past the end runs backwards, so reflected passes are the even ones
+    // (0-indexed). Getting this backwards still looks right at the midpoint — test
+    // elsewhere.
     if (kind == LoopKind::PingPong && std::fmod(cycles, 2.0) < 1.0) {
         phase = period - phase;
     }
@@ -481,8 +464,8 @@ bool readValue(lua_State* L, int index, core::Value& out) {
         out = core::Value::scalar(lua_tonumber(L, index));
         return true;
     }
-    // A plain table is still accepted: somebody will write `{50, 80}` before they find
-    // vec(), and refusing it would be pedantry rather than safety.
+    // Plain tables accepted too — {50, 80} before someone discovers vec() shouldn't be
+    // rejected.
     if (lua_istable(L, index)) {
         const auto n = static_cast<int>(luaL_len(L, index));
         if (n < 2 || n > 4) {
@@ -515,14 +498,9 @@ void installExpressionLibrary(lua_State* L) {
     };
     luaL_setfuncs(L, kVecMethods, 0);
 
-    // Hide the metatable. Without this a script can reach it with `getmetatable(value)`
-    // and overwrite `__index`, and every expression evaluated afterwards in this sandbox
-    // reads vectors through whatever it replaced it with. One preset quietly breaking
-    // every other expression in the project is a worse failure than anything the
-    // filesystem guards prevent, because it produces wrong output rather than no output.
-    //
-    // Setting __metatable makes getmetatable return this string instead and makes
-    // setmetatable refuse outright.
+    // Hidden: without this, getmetatable(value)/overwrite __index would let one script
+    // corrupt vector behavior for every other expression. __metatable makes getmetatable
+    // return this string and setmetatable refuse.
     lua_pushliteral(L, "vector");
     lua_setfield(L, -2, "__metatable");
 

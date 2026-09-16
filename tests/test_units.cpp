@@ -29,8 +29,7 @@ void check_near(double a, double b, const char* what) {
     }
 }
 
-// The failure this exists to prevent: a transition authored as 3 frames at 30fps is
-// 100ms, but replayed at 60fps it becomes 50ms and plays twice as fast.
+// Frames-authored time changes duration when the frame rate changes; seconds don't.
 void frames_are_not_a_unit_of_time() {
     const TimeContext at30{30.0, 120.0, false};
     const TimeContext at60{60.0, 120.0, false};
@@ -39,7 +38,6 @@ void frames_are_not_a_unit_of_time() {
     check_near(to_seconds(three_frames, at30), 0.1, "3 frames @30fps == 100ms");
     check_near(to_seconds(three_frames, at60), 0.05, "3 frames @60fps == 50ms");
 
-    // Stored in seconds instead, it survives the framerate change.
     const TimeValue hundred_ms = TimeValue::seconds(0.1);
     check_near(to_seconds(hundred_ms, at30), 0.1, "100ms @30fps");
     check_near(to_seconds(hundred_ms, at60), 0.1, "100ms @60fps");
@@ -47,8 +45,7 @@ void frames_are_not_a_unit_of_time() {
     check_near(to_frames(hundred_ms, at60), 6.0, "100ms is 6 frames @60fps");
 }
 
-// Seconds fix framerate but not tempo. Half a beat is a different duration at
-// every BPM, which is why anything meant to land on the music stores beats.
+// Half a beat is a different duration at every BPM; music-synced time stores beats.
 void beats_survive_tempo_changes() {
     const TimeContext slow{30.0, 90.0, true};
     const TimeContext fast{30.0, 174.0, true};
@@ -61,15 +58,13 @@ void beats_survive_tempo_changes() {
     check_near(to_seconds(one_bar, slow), 240.0 / 90.0, "one bar @90bpm");
 }
 
-// Frames mode is opt-in precisely so stutter/strobe effects pass through exactly
-// rather than round-tripping through seconds and landing on a fraction.
+// Frames mode must pass through exactly, not round-trip through seconds.
 void frames_mode_passes_through_exactly() {
     const TimeContext odd{23.976, 137.0, true};
     check_near(to_frames(TimeValue::frames(3.0), odd), 3.0, "3 frames stays 3 frames");
 }
 
-// An AE preset authored on 1920x1080 applies wrong to 1080x1920 because blur
-// radii are stored in pixels. Declared units make it portable.
+// Pixel-stored values don't survive a resolution change; declared units do.
 void spatial_units_survive_resolution_changes() {
     const FrameGeometry landscape{1920, 1080};
     const FrameGeometry vertical{1080, 1920};
@@ -100,7 +95,7 @@ void spatial_units_survive_resolution_changes() {
     }
 }
 
-// The suffix is what the UI shows after the number, so a percentage has to look like one.
+// Suffix is what the UI shows after the number.
 void units_carry_a_display_suffix() {
     check(std::string(unitSuffix(SpatialUnit::Percent)) == "%", "percent shows %");
     check(std::string(unitSuffix(SpatialUnit::PercentOfWidth)) == "%",

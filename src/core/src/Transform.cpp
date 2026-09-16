@@ -8,24 +8,21 @@
 namespace ruby::core {
 namespace {
 
-// A property's component at a time, or a fallback when the property is absent. Layers
-// built before a property existed simply do not have it, and that has to be survivable.
+// Property's component at a time, or fallback if the property doesn't exist
+// (e.g. layer predates it).
 double componentOr(const Layer& layer, std::string_view key, int index, double fallback,
                    double seconds, const TimeContext& ctx) {
     const Property* prop = layer.find(key);
     if (prop == nullptr) {
         return fallback;
     }
-    // Through core::evaluate, not Property::evaluate, so an expression on Position or
-    // Rotation actually runs. Falls straight back to keyframes when no interpreter is
-    // installed, which is every test that does not care.
+    // Uses core::evaluate, not Property::evaluate, so expressions on Position/Rotation
+    // actually run; falls back to keyframes with no interpreter installed.
     const Value v = evaluate(layer, *prop, seconds, ctx);
     const double got = (index < v.count) ? v.c[static_cast<std::size_t>(index)] : fallback;
 
-    // A non-finite value here would poison the whole matrix, and a NaN matrix reaching the
-    // GPU makes a layer silently vanish with nothing to diagnose. It can arrive from a
-    // corrupt file today and from an expression the moment scripting lands, so it is
-    // caught at the one point every transform value passes through.
+    // Guards against NaN/Inf reaching the GPU (corrupt file or bad expression) — a NaN
+    // matrix silently vanishes the layer with nothing to diagnose.
     return std::isfinite(got) ? got : fallback;
 }
 
@@ -88,9 +85,8 @@ Bounds layerBounds(const Composition& comp, const Layer& layer, double seconds,
                    const SizeOf& sizeOf) {
     const LayerSize size = sizeOf ? sizeOf(layer) : LayerSize{};
 
-    // The same two steps the compositor uses, in the same order, because a box that
-    // disagrees with what is on screen is worse than no box at all. Unit square, centred,
-    // scaled to the layer, then through the layer's full transform.
+    // Mirrors the compositor's own steps so the box matches what's on screen: unit
+    // square, centered, scaled, then through the layer's full transform.
     const Transform2D unitToLayer =
         Transform2D::translate(-0.5, -0.5).then(Transform2D::scale(size.width, size.height));
     const Transform2D toComp =
@@ -116,8 +112,8 @@ Bounds layerBounds(const Composition& comp, const Layer& layer, double seconds,
 
 Transform2D layerTransform(const Layer& layer, double seconds, const TimeContext& ctx,
                            double compWidth, double compHeight, const LayerSize& size) {
-    // Position and anchor point are percentages, which is what makes a preset built on a
-    // vertical composition land correctly on a landscape one.
+    // Position/anchor are percentages, so a preset built for one aspect ratio lands
+    // correctly on another.
     const double px = componentOr(layer, "position", 0, 50.0, seconds, ctx);
     const double py = componentOr(layer, "position", 1, 50.0, seconds, ctx);
     const double ax = componentOr(layer, "anchor_point", 0, 0.0, seconds, ctx);
@@ -126,16 +122,13 @@ Transform2D layerTransform(const Layer& layer, double seconds, const TimeContext
     const double sy = componentOr(layer, "scale", 1, 100.0, seconds, ctx);
     const double rot = componentOr(layer, "rotation", 0, 0.0, seconds, ctx);
 
-    // The anchor is a percentage of the LAYER, not of the frame: it is the point on the
-    // layer that sits at Position and that rotation and scale pivot around. 0,0 is the
-    // centre so an untouched layer rotates about itself, which is what people expect and
-    // what the default transform already stores.
+    // Anchor is a percentage of the LAYER, not the frame — the pivot point for
+    // rotation/scale, placed at Position. 0,0 is center.
     const double anchorX = ax / 100.0 * size.width;
     const double anchorY = ay / 100.0 * size.height;
 
-    // Order matters and this is the order: move the anchor to the origin, scale, rotate,
-    // then move to the position. Rotating before centring on the anchor makes a layer
-    // swing around a point it is not on, which is the classic wrong-looking result.
+    // Order matters: anchor to origin, scale, rotate, then position. Rotating before
+    // centering swings the layer around the wrong point.
     return Transform2D::translate(-anchorX, -anchorY)
         .then(Transform2D::scale(sx / 100.0, sy / 100.0))
         .then(Transform2D::rotate(rot))
@@ -151,8 +144,7 @@ Transform2D resolvedTransform(const Composition& comp, const Layer& layer, doubl
     Transform2D out =
         layerTransform(layer, seconds, ctx, compWidth, compHeight, sizeFor(layer));
 
-    // A child is positioned in its parent's space. It inherits the parent's transform,
-    // never the parent's dimensions.
+    // A child inherits the parent's transform, never its dimensions.
     LayerId seen[kMaxParentDepth];
     int depth = 0;
     const Layer* current = &layer;
@@ -160,9 +152,8 @@ Transform2D resolvedTransform(const Composition& comp, const Layer& layer, doubl
     while (current->parent.has_value() && depth < kMaxParentDepth) {
         const LayerId parentId = *current->parent;
 
-        // A cycle would otherwise spin here forever, inside the render path, with no
-        // error and a frozen window. Bounded and silent: a broken link is a document
-        // problem, and this is the wrong place to report it.
+        // Guards against a cycle spinning forever in the render path. Silent — a broken
+        // link is a document problem, not this function's to report.
         bool repeated = false;
         for (int i = 0; i < depth; ++i) {
             if (seen[i] == parentId) {
@@ -180,8 +171,8 @@ Transform2D resolvedTransform(const Composition& comp, const Layer& layer, doubl
         }
         seen[depth++] = parentId;
 
-        // The parent's own size, not the child's. A parent with an off-centre anchor
-        // pivots around a point on ITSELF.
+        // Parent's own size, not the child's — an off-center anchor pivots around a
+        // point on itself.
         out = out.then(layerTransform(*parent, seconds, ctx, compWidth, compHeight,
                                       sizeFor(*parent)));
         current = parent;

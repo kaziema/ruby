@@ -99,8 +99,7 @@ std::vector<SchemaProblem> validate(const EffectSchema& s) {
             add(where, "introduced_in_schema must be in [1, schema]");
         }
 
-        // Range sanity. Each of these is a mistake that produces a control which looks
-        // fine and cannot be used, which is worse than one that obviously does not work.
+        // Each check below catches a control that looks fine but is unusable.
         const ParamRange& r = p.range;
         if (r.minimum.has_value() && r.maximum.has_value() && *r.minimum > *r.maximum) {
             add(where, "range minimum is above its maximum");
@@ -125,8 +124,8 @@ std::vector<SchemaProblem> validate(const EffectSchema& s) {
             add(where, "legacy_default is outside the hard range; content authored "
                        "before this parameter existed would be silently changed");
         }
-        // A parameter added after v1 is loaded into older content, so it needs a
-        // legacy_default or old presets silently adopt the new default.
+        // A parameter added after v1 needs a legacy_default, or old presets silently
+        // adopt the new default.
         if (p.introduced_in_schema > 1 && !p.legacy_default.has_value()) {
             add(where,
                 "parameter introduced after schema 1 has no legacy_default; content "
@@ -196,9 +195,8 @@ std::vector<SchemaProblem> validate_against_previous(const EffectSchema& previou
                 "existing content will silently change");
         }
 
-        // Widening a hard limit cannot break stored content. Tightening one can: a value
-        // that was legal yesterday now evaluates to something else. Slider range and
-        // group are display only and are not checked here at all.
+        // Widening a hard limit is safe; tightening can reinterpret stored values that
+        // were legal before. Slider range/group are display-only, not checked here.
         const auto tightened = [](const std::optional<double>& before,
                                   const std::optional<double>& now_, bool isMin) {
             if (!now_.has_value()) return false;         // now unbounded: widened

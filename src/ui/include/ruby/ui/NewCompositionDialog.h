@@ -10,11 +10,8 @@ class QSpinBox;
 
 namespace ruby::ui {
 
-// Settings for a new composition.
-//
-// Presets first, fields second. Almost nobody types 1080 by 1920 on purpose; they pick
-// "Vertical" because that is the shape of the thing they are making. The fields exist
-// for the case the presets do not cover, not as the primary way in.
+// Settings for a new composition. Presets first, fields second (for cases presets
+// don't cover).
 class NewCompositionDialog : public QDialog {
     Q_OBJECT
 
@@ -29,13 +26,9 @@ public:
 
     explicit NewCompositionDialog(QWidget* parent = nullptr);
 
-    // Same dialog, seeded with an existing composition: the fields are identical, so a
-    // second one would be the same code with a different title.
-    //
-    // This is the only way to shorten a composition. Duration grows on its own whenever
-    // a layer runs past the end, and never shrinks on its own, so this dialog is the
-    // release valve for that. contentEnd is shown but not enforced: setting a duration
-    // below it leaves layers hanging over the end rather than trimming them.
+    // Seeded with an existing composition; the only way to shorten one, since duration
+    // only grows on its own. contentEnd is shown but not enforced — a shorter duration
+    // doesn't trim layers hanging past it.
     NewCompositionDialog(const Settings& existing, double contentEnd,
                          QWidget* parent = nullptr);
 

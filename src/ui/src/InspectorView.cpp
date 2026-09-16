@@ -31,14 +31,8 @@ namespace {
 constexpr int kSubtitleH = 22;
 constexpr int kComponentGap = 6;
 
-// How much one pixel of horizontal drag moves the value.
-//
-// This used to be a switch on the unit, which meant every Normalized parameter scrubbed
-// at 0.01 per pixel whether its useful range was 0 to 1 or 0 to 500. Glow Threshold and
-// Grade Exposure are both Normalized and want steps two orders of magnitude apart.
-//
-// It comes from the parameter's own slider range now, so a control crosses its useful
-// span in about the same drag distance whatever it measures, and nobody tunes a table.
+// Drag step comes from each property's own range, not a per-unit constant — otherwise
+// e.g. two Normalized params with very different useful spans scrub at the same rate.
 constexpr int kLabelX = 26;
 constexpr int kLabelW = 76;
 constexpr int kEdgePad = 9;
@@ -72,8 +66,7 @@ const Property* InspectorView::resolve(const PropRef& ref) const {
 }
 
 Property* InspectorView::resolveMutable(const PropRef& ref) {
-    // const_cast rather than duplicating the lookup: the two walks are identical and
-    // keeping them in step by hand is how they drift.
+    // const_cast to avoid duplicating the lookup walk.
     return const_cast<Property*>(resolve(ref));
 }
 
@@ -150,8 +143,7 @@ void InspectorView::rebuildGroups() {
         addTo(l->properties[i].group, -1, PropRef{-1, static_cast<int>(i)});
     }
 
-    // Then one group per effect, in the order the stack applies them. This is the design's
-    // merged inspector: transform and the effect stack in a single panel.
+    // Then one group per effect, in stack order.
     for (std::size_t e = 0; e < l->effects.size(); ++e) {
         const core::EffectInstance& effect = l->effects[e];
         const std::string name =
@@ -203,8 +195,7 @@ void InspectorView::paintEvent(QPaintEvent*) {
         p.drawText(QRect(kEdgePad, y, 12, metrics::kInspectorGroupH), Qt::AlignCenter,
                    group.expanded ? QStringLiteral("▾") : QStringLiteral("▸"));
 
-        // Effect groups get the design's green fx marker; property groups stay neutral.
-        // The group knows which it is now that effects are real.
+        // Effect groups get the fx marker; property groups stay neutral.
         p.fillRect(QRect(kEdgePad + 14, y + (metrics::kInspectorGroupH - 9) / 2, 9, 9),
                    group.effect >= 0 ? kExpressionText : QColor("#4a4a4a"));
 
@@ -260,18 +251,19 @@ void InspectorView::paintEvent(QPaintEvent*) {
                        Qt::AlignVCenter | Qt::AlignLeft,
                        QString::fromStdString(prop.label));
 
-            // Scrubbable values are orange with a dotted underline, per the design.
-            // Each component gets its own rect so x and y can be scrubbed separately.
+            // Each component gets its own rect so x/y scrub separately.
             const QFont valueFont = monoFont(type::kMeta);
             const QFontMetrics fm(valueFont);
             p.setFont(valueFont);
 
             const core::Value v = prop.evaluate(currentTime_, ctx);
             const QString suffix = QString::fromUtf8(core::unitSuffix(prop.unit));
+            const bool db = prop.unit == core::SpatialUnit::Decibels;
 
             QStringList parts;
             for (int c = 0; c < v.count; ++c) {
-                parts << QString::number(v.c[static_cast<std::size_t>(c)], 'f', 1);
+                const double raw = v.c[static_cast<std::size_t>(c)];
+                parts << QString::number(db ? core::linearToDecibels(raw) : raw, 'f', 1);
             }
 
             int totalW = fm.horizontalAdvance(suffix);
@@ -287,11 +279,8 @@ void InspectorView::paintEvent(QPaintEvent*) {
                 const int w = fm.horizontalAdvance(parts.at(c));
                 const QRect field(x, y, w, metrics::kInspectorRowH);
 
-                // A property driven by an expression is drawn in the expression colour
-                // and underlined solid rather than dotted. Without a mark, a value that
-                // ignores what you type into it looks like a broken field: the number is
-                // not editable because something else is deciding it, and that has to be
-                // visible before you try.
+                // Expression-driven values get a distinct color and solid underline, so
+                // it's clear before you try that typing won't do anything.
                 const bool expressed =
                     prop.expression.has_value() && !prop.expression->empty();
 
@@ -378,9 +367,7 @@ void InspectorView::editExpression(const PropRef& ref) {
     editor->setFont(monoFont(12));
     layout->addWidget(editor);
 
-    // The whole vocabulary, in the dialog. Nobody remembers an expression language they
-    // use twice a month, and sending people to documentation that does not exist yet is
-    // worse than a crowded dialog.
+    // Full expression vocabulary shown inline (no separate docs).
     auto* help = new QLabel(
         QStringLiteral("time · value · wiggle(freq, amp) · loopOut('cycle'|'pingpong'|"
                        "'offset') · linear(t, tMin, tMax, a, b) · ease(...) · "
@@ -392,10 +379,8 @@ void InspectorView::editExpression(const PropRef& ref) {
     help->setStyleSheet(QStringLiteral("color: %1;").arg(theme::kTextDim.name()));
     layout->addWidget(help);
 
-    // Offered, never automatic. Running the converter over something already written in
-    // Lua would be a fine way to break a working expression, so the button appears only
-    // when the text actually looks like After Effects, and pressing it is the user
-    // deciding rather than the app assuming.
+    // Button only appears when the text looks like AE syntax; conversion is opt-in so it
+    // never mangles an already-working Lua expression.
     auto* convert = new QPushButton(QStringLiteral("Convert from After Effects"), &dialog);
     auto* report = new QLabel(&dialog);
     report->setWordWrap(true);
@@ -414,8 +399,7 @@ void InspectorView::editExpression(const PropRef& ref) {
             script::convertFromAfterEffects(editor->toPlainText().toStdString());
         editor->setPlainText(QString::fromStdString(c.lua));
 
-        // What it did and what it could not do, both. A converter that stays silent about
-        // the half it skipped is a converter you trust once.
+        // Report both what converted and what didn't.
         QStringList lines;
         for (const std::string& note : c.notes) {
             lines << QStringLiteral("· %1").arg(QString::fromStdString(note));
@@ -462,37 +446,38 @@ const InspectorView::ValueField* InspectorView::fieldAt(const QPoint& pos) const
     return nullptr;
 }
 
+// Both of these work in DISPLAY units — dB for a Decibels property, otherwise identical
+// to what's stored. Every caller (drag, double-click editor) wants what's on screen, and
+// centralizing the conversion here means it happens exactly once per direction.
 double InspectorView::componentValue(const ValueField& field) const {
     const Property* prop = resolve(field.property);
     if (prop == nullptr || comp_ == nullptr) {
         return 0.0;
     }
     const core::Value v = prop->evaluate(currentTime_, comp_->timeContext());
-    return v.c[static_cast<std::size_t>(field.component)];
+    const double raw = v.c[static_cast<std::size_t>(field.component)];
+    return prop->unit == core::SpatialUnit::Decibels ? core::linearToDecibels(raw) : raw;
 }
 
-void InspectorView::applyValue(const ValueField& field, double value) {
+void InspectorView::applyValue(const ValueField& field, double displayValue) {
     Property* found = resolveMutable(field.property);
     if (found == nullptr || comp_ == nullptr) {
         return;
     }
     Property& prop = *found;
     const core::TimeContext ctx = comp_->timeContext();
+    const double value = prop.unit == core::SpatialUnit::Decibels
+                             ? core::decibelsToLinear(displayValue)
+                             : displayValue;
 
     core::Value v = prop.evaluate(currentTime_, ctx);
-    // Clamped going in, not just coming out.
-    //
-    // Reading is clamped too, so the picture would be right either way. The difference is
-    // the drag: without this, pulling Opacity to 400 and back to 150 stores 400 and shows
-    // 100 the whole way, and you have to drag 300 units back through a dead zone before
-    // the number moves. A control that stops responding to the mouse feels broken long
-    // before anyone works out why.
+    // Clamp on write too (not just read), so a drag past the range doesn't create a dead
+    // zone before the value starts moving again.
     v.c[static_cast<std::size_t>(field.component)] = prop.range.clamp(value);
 
     if (prop.animated()) {
-        // A keyframed property records the edit at the playhead, which is what AE does
-        // once the stopwatch is on. Ease matches whatever the previous key used, so a
-        // hand edit does not drop a linear key into an eased run.
+        // Records the edit at the playhead (AE-style); ease matches the previous key so a
+        // hand edit doesn't drop a linear key into an eased run.
         core::Keyframe k;
         k.time = core::TimeValue::seconds(currentTime_);
         k.value = v;
@@ -536,7 +521,6 @@ bool InspectorView::event(QEvent* e) {
     QString text;
 
     if (const ValueField* field = fieldAt(pos); field != nullptr) {
-        // The single least discoverable thing in the panel: these numbers are draggable.
         text = QStringLiteral("Drag to change  ·  double-click to type  ·  hold shift for "
                               "fine steps");
         if (const Property* prop = resolve(field->property);
@@ -560,7 +544,7 @@ bool InspectorView::event(QEvent* e) {
                 cursor += metrics::kInspectorRowH *
                           static_cast<int>(group.properties.size());
             }
-            // The keyframe indicator sits left of the label on every property row.
+            // Keyframe indicator column.
             if (pos.x() < kLabelX && pos.y() < cursor) {
                 text = QStringLiteral("Filled means this property is animated");
                 break;
@@ -628,7 +612,9 @@ void InspectorView::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
 
-    double step = prop->range.dragStep();
+    // dragStep() is calibrated in stored (linear) units; dragStartValue_ here is display
+    // (dB), so a fixed dB-per-pixel step is used instead of deriving one from the range.
+    double step = prop->unit == core::SpatialUnit::Decibels ? 0.5 : prop->range.dragStep();
     if (e->modifiers().testFlag(Qt::ShiftModifier)) {
         step *= 0.1;  // fine adjust
     }

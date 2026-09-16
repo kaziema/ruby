@@ -7,8 +7,7 @@
 
 namespace ruby::ui {
 
-// Shared display formatting. Both the timeline and the inspector show the same values,
-// so they read from one implementation rather than two copies that drift.
+// Shared display formatting so the timeline and inspector can't drift apart.
 
 // MM:SS:FF at the composition's frame rate.
 [[nodiscard]] QString formatTimecode(double seconds, double fps);

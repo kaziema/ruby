@@ -46,16 +46,14 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    // The GPU device is owned by the application, not by this window. Null is a legal
-    // state: the UI runs fine, the viewport just stays blank. That also keeps headless
-    // tests from having to bring up a graphics stack to open a menu.
+    // Owned by the application, not this window. Null is legal: viewport stays blank,
+    // which also lets headless tests open a menu without a graphics stack.
     explicit MainWindow(gpu::GpuDevice* device = nullptr, QWidget* parent = nullptr);
 
     [[nodiscard]] const core::Project& project() const noexcept { return project_; }
 
-    // How big a layer is, before its own scale. The compositor works this out from decoded
-    // frames; the window works it out from the media pool and a text layout, which agree
-    // for everything the align panel can act on.
+    // Layer size before its own scale. Derived from the media pool / text layout here
+    // rather than decoded frames, but agrees wherever the align panel needs it to.
     [[nodiscard]] core::SizeOf layerSizes();
 
     // Moves the selected layer so one of its edges or centres meets the composition's.
@@ -65,9 +63,8 @@ public:
     // The selected layers that have a picture and are not locked.
     [[nodiscard]] std::vector<core::LayerId> alignableSelection();
 
-    // Moves one layer by a distance in composition pixels, converting into the parent's
-    // space and into the percentages Position is stored in, and refusing when the write
-    // would not actually move it. Returns whether anything changed.
+    // Moves a layer by composition pixels, converted into the parent's space and into
+    // Position's percentage units. Returns whether it actually moved.
     [[nodiscard]] bool nudgeLayerBy(core::Layer& layer, double dx, double dy,
                                     double seconds, const core::SizeOf& sizes);
 
@@ -84,6 +81,7 @@ signals:
 public slots:
     void splitLayerAtPlayhead();
     void toggleSelectedLayerProperties();
+    void revealSelectedLayerAudioLevel();
     void undo();
     void redo();
     void beginEdit(const QString& label);
@@ -120,8 +118,7 @@ public slots:
     void compositionFromMedia(core::MediaId media);
     void deleteProjectItem(bool isComposition, std::uint64_t id);
 
-    // Layer > New. Both land above the selected layer, as AE does, so a new layer arrives
-    // where you were looking rather than at the top of a twenty layer stack.
+    // Layer > New. Lands above the selected layer (as AE does), not atop the whole stack.
     void newSolidLayer();
     void newNullLayer();
 
@@ -133,36 +130,29 @@ public slots:
     core::Layer* createLayer(const QString& undoLabel, const std::string& name,
                              core::LayerKind kind);
 
-    // Right click on a layer. Pops the same QActions the Edit and Layer menus use, so
-    // the two can never drift apart or show different shortcuts for the same thing.
+    // Right-click menu; reuses the Edit/Layer menu QActions so shortcuts can't drift.
     void showLayerContextMenu(const QPoint& globalPos);
 
     // Shared by delete and cut. Picks the next sensible selection and refreshes.
     void removeSelectedLayer(const QString& undoLabel);
 
-    // Called whenever growToFit actually moved the duration. Growth silently rescales
-    // every bar on the timeline, so it has to be announced or it reads as a glitch.
+    // Called when growToFit changes duration; rescaling every timeline bar silently
+    // would read as a glitch otherwise.
     void noteCompositionGrew();
 
-    // Decode a clip's audio once and write its peak pyramid to the cache. Returns the
-    // state so the caller can say what happened; Failed covers "no audio" as well as
-    // "unreadable", because neither produces a waveform.
+    // Decodes a clip's audio and writes its peak pyramid to the cache. Failed covers
+    // both "no audio" and "unreadable".
     media::ConformState conformAudio(const QString& path);
 
-    // Republish the mix from the layers as they are right now.
-    //
-    // Split out from loadAudio because it runs on every mouse move of a drag. It only
-    // reads buffers that are already decoded and never analyses anything, so it is a
-    // walk of the layer list and a seqlock write. loadAudio does the expensive half
-    // (decode, peaks, rhythm) and then calls this.
+    // Rebuilds the mix from already-decoded buffers; cheap enough to run on every drag
+    // move. loadAudio does the expensive decode/peaks/rhythm work, then calls this.
     void rebuildMix();
     void addMediaToComposition(core::MediaId id);
     void dropMediaIntoComposition(core::MediaId media, double seconds, int layerIndex);
     void setActiveComposition(core::CompId id);
 
 protected:
-    // Closing with unsaved work has to be interceptable, so this is an override rather
-    // than a signal connection.
+    // Override (not a signal) so closing with unsaved work can be intercepted.
     void closeEvent(QCloseEvent* e) override;
 
 private:
@@ -188,13 +178,11 @@ private:
     static QWidget* makePlaceholder(const QString& note);
 
 
-    // Layer clipboard. A whole Layer by value: it carries its own properties, keyframes
-    // and effects, and media/precomp references are project-level ids that stay valid
-    // when it is pasted into a different composition.
+    // Layer clipboard, by value. Media/precomp refs are project-level ids, so pasting
+    // into a different composition still resolves.
     std::optional<core::Layer> clipboard_;
 
-    // App-level, not project-level: every clip ever imported, in any project. Lives in
-    // per-user app data, loaded at launch, written on import.
+    // App-level (not project-level): every clip ever imported, across all projects.
     io::MediaPool pool_;
     QString poolPath_;
 
@@ -202,19 +190,16 @@ private:
     QString peaksDir_;
 
     core::Project project_;  // TEMPORARY demo content
-    // Decoded audio, one entry per media item, keyed so two layers using the same clip
-    // decode it once. Node-based on purpose: the mixer holds raw pointers into these, and
-    // a vector reallocating under the audio thread would be a crash you could not
-    // reproduce. Entries are never erased during a session for the same reason.
+    // Keyed so shared clips decode once. Map, not vector: the mixer holds raw pointers
+    // into these entries, which a reallocating vector would invalidate under the audio
+    // thread. Never erased mid-session for the same reason.
     std::map<core::MediaId, media::AudioBuffer> audio_;
 
-    // Peak pyramids for drawing, one per media item, shared by every layer that uses the
-    // clip. Kept beside the samples rather than on the layer: two layers cutting the same
-    // clip want the same peaks, and a per-layer copy would be the same data twice.
+    // Peak pyramids for drawing, shared by every layer using the clip rather than
+    // duplicated per-layer.
     std::map<core::MediaId, media::PeakPyramid> peaks_;
 
-    // Which clip the rhythm map was last built from. Rhythm analysis is expensive and
-    // must not re-run every time a layer is nudged.
+    // Last clip analyzed for rhythm; expensive, so it must not re-run on every nudge.
     std::optional<core::MediaId> analyzedRhythmFor_;
     std::unique_ptr<audio::AudioOutput> audioOut_;
     QString rhythmNote_;
@@ -239,9 +224,8 @@ private:
     // The composition viewer's page, so its tab can be renamed wherever it ends up.
     QWidget* viewerPage_ = nullptr;
 
-    // A frame that loses its last tab disappears and the rest take the space. Recomputed
-    // rather than toggled per event, because a tab move is a removal and an insertion and
-    // the state in between is not one anybody should see.
+    // Recomputed rather than toggled per event: a tab move is a removal + insertion, and
+    // the in-between state shouldn't be visible.
     void updatePanelVisibility();
     core::CompId activeComp_ = 0;
     QString projectPath_;

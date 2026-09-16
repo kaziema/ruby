@@ -37,8 +37,7 @@ EffectsPanel::EffectsPanel(QWidget* parent) : QWidget(parent) {
     search_ = new QLineEdit(this);
     search_->setPlaceholderText(QStringLiteral("Search"));
     search_->setFixedHeight(kSearchH);
-    // Click focus only, and Escape gives it back. A search field that grabs focus at
-    // launch eats the spacebar, which is how the project panel's search broke playback.
+    // Click focus only: grabbing focus at launch would eat the spacebar before playback.
     search_->setFocusPolicy(Qt::ClickFocus);
     layout->addWidget(search_);
     layout->addStretch(1);
@@ -70,9 +69,7 @@ void EffectsPanel::rebuild() {
         return;  // presets and colour correction have nothing behind them yet
     }
 
-    // Grouped by category when nothing is typed, flat when something is. Headings during
-    // a search are noise: you already know what you asked for, and they push the answer
-    // further down the list.
+    // Grouped by category normally; flat while searching, since headings are noise then.
     const bool searching = !filter_.isEmpty();
     std::map<QString, std::vector<Row>> grouped;
 
@@ -81,8 +78,8 @@ void EffectsPanel::rebuild() {
         const QString category =
             QString::fromStdString(engine::effectCategory(def.schema.id));
 
-        // Matching the category too, so "blur" finds everything under Blur rather than
-        // only the effects with Blur in their name.
+        // Matches category too, so "blur" finds everything under Blur, not just name
+        // matches.
         if (searching && !name.contains(filter_, Qt::CaseInsensitive) &&
             !category.contains(filter_, Qt::CaseInsensitive)) {
             continue;
@@ -104,10 +101,7 @@ void EffectsPanel::rebuild() {
 }
 
 int EffectsPanel::rowAt(int y) const {
-    // Painting stops at the bottom of the panel and hit testing did not, so a list longer
-    // than the panel had rows underneath it that could be selected, dragged onto a layer
-    // and double-clicked while being invisible. The same bug the project panel had
-    // against its footer.
+    // Must match where painting stops, or rows past the visible area stay interactive.
     if (y < kSearchH || y >= height()) {
         return -1;
     }
@@ -124,9 +118,7 @@ void EffectsPanel::paintEvent(QPaintEvent*) {
         p.setFont(font());
         const QRect box(kEdgePad, kSearchH, width() - kEdgePad * 2, height() - kSearchH);
 
-        // Each empty state says which kind of empty it is. "Nothing here" would be the
-        // same words for "you have not made any yet" and "your search found nothing",
-        // and those want opposite things from the user.
+        // Distinct message per empty reason ("no effects" vs. "search found nothing").
         QString message;
         switch (tab_) {
             case Tab::Effects:
@@ -168,8 +160,7 @@ void EffectsPanel::paintEvent(QPaintEvent*) {
         if (i == selected_) {
             p.fillRect(QRect(0, y, width(), kRowH), kRowSelected);
         }
-        // The same green fx marker the timeline and inspector use for an effect, so the
-        // three panels agree about what an effect looks like.
+        // Same fx marker colour the timeline/inspector use for an effect.
         p.fillRect(QRect(kEdgePad + 4, y + kRowH / 2 - 4, 8, 8), kExpressionText);
 
         p.setFont(font());
@@ -204,8 +195,7 @@ void EffectsPanel::mouseMoveEvent(QMouseEvent* e) {
     auto* mime = new QMimeData;
     mime->setData(effectMimeType(), QByteArray(row.effectId.c_str()));
 
-    // A badge under the cursor, for the same reason the media drag has one: a drag with
-    // no visible payload is a guess about what you picked up.
+    // Badge under the cursor so the drag shows its payload.
     const QFontMetrics fm(font());
     const int w = fm.horizontalAdvance(row.label) + 34;
     QPixmap badge(w, kRowH);

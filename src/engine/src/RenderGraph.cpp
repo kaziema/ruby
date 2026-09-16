@@ -26,12 +26,8 @@ NodeHash hashValue(const core::Value& v, NodeHash seed) noexcept {
     return h;
 }
 
-// A property's contribution is its VALUE at this instant, not its keyframes.
-//
-// Two frames of the same animation differ; two different animations that happen to agree
-// on this frame do not. Hashing the curve instead would make every frame of a keyframed
-// layer miss the cache even where the value had not changed, which is precisely the case
-// worth catching: a layer that holds still for two seconds should render once.
+// Hash the property's VALUE at this instant, not its keyframe curve — otherwise a layer
+// that holds still for two seconds would miss cache on every frame anyway.
 NodeHash hashProperty(const core::Layer& owner, const core::Property& p, double seconds,
                       const core::TimeContext& ctx, NodeHash seed) noexcept {
     NodeHash h = hashString(p.key, seed);
@@ -74,9 +70,8 @@ NodeHash hashBytes(const void* data, std::size_t size, NodeHash seed) noexcept {
 }
 
 NodeHash hashDouble(double v, NodeHash seed) noexcept {
-    // Normalised so that -0.0 and 0.0 hash the same, and so every NaN hashes the same.
-    // Without this a value that is numerically identical can carry different bits and miss
-    // a cache entry that is genuinely correct.
+    // Normalize -0.0 -> 0.0 and all NaNs to one bit pattern, or numerically-equal values
+    // hash differently and miss a valid cache entry.
     if (v == 0.0) {
         v = 0.0;
     } else if (std::isnan(v)) {
@@ -96,7 +91,7 @@ int RenderGraph::outputFor(core::LayerId layer) const noexcept {
     for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
         const RenderNode& n = nodes[static_cast<std::size_t>(i)];
         if (n.layer == layer && n.kind != RenderNode::Kind::Composite) {
-            best = i;  // effect nodes are appended after their source, so the last wins
+            best = i;  // effect nodes append after their source; last one wins
         }
     }
     return best;
@@ -109,12 +104,11 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
 
     const double fps = comp.fps > 0.0 ? comp.fps : 30.0;
     graph.frame = static_cast<std::int64_t>(std::llround(seconds * fps));
-    // Snapped back so everything downstream is evaluated at the frame's own time rather
-    // than wherever the playhead happens to sit inside it. Two scrubs landing on the same
-    // frame must produce the same graph, or the cache is useless during a scrub.
+    // Snap back to the frame's own time: two scrubs landing on the same frame must
+    // produce the same graph.
     const double t = static_cast<double>(graph.frame) / fps;
 
-    // Solo is a whole-composition question, answered once before any layer is judged.
+    // Solo is whole-composition, so resolve it once up front.
     bool anySolo = false;
     for (const core::Layer& layer : comp.layers) {
         if (layer.solo && layer.kind != core::LayerKind::Audio) {
@@ -129,15 +123,13 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
     compositeHash = hashDouble(fps, compositeHash);
 
     const core::SizeOf sizeOf = [&comp](const core::Layer& l) -> core::LayerSize {
-        // The graph only needs sizes to hash the transform, and a transform that resolves
-        // through a parent needs every parent's size. Composition-sized is the right
-        // approximation here: it is stable, and a wrong size would only ever cause a
+        // Approximated as composition-sized: stable, and a wrong size can only cause a
         // needless miss, never a wrong hit.
         (void)l;
         return {static_cast<double>(comp.width), static_cast<double>(comp.height)};
     };
 
-    // Bottom first, matching the draw order, so the composite hash depends on stacking.
+    // Bottom first, matching draw order, so the composite hash depends on stacking.
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         const core::Layer& layer = *it;
 
@@ -162,9 +154,8 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
         NodeHash h = hashInt(static_cast<std::int64_t>(layer.kind), kOffsetBasis);
         if (const std::string path = project.pathFor(layer); !path.empty()) {
             h = hashString(path, h);
-            // The frame of the file being read, not the composition frame. A clip trimmed
-            // to a different in point reads a different frame at the same playhead, and
-            // two layers on the same clip at the same source frame are the same picture.
+            // Source-file frame, not composition frame: a different in-point trim reads a
+            // different frame at the same playhead.
             h = hashInt(static_cast<std::int64_t>(std::llround((t - in) * fps)), h);
         } else if (external != nullptr) {
             if (const auto found = external->find(layer.id); found != external->end()) {
@@ -184,7 +175,7 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
         for (std::size_t e = 0; e < layer.effects.size(); ++e) {
             const core::EffectInstance& fx = layer.effects[e];
             if (!fx.enabled) {
-                continue;  // a disabled effect is not in the picture and not in the graph
+                continue;  // disabled effects don't appear in the graph
             }
             RenderNode node;
             node.kind = RenderNode::Kind::Effect;
@@ -206,10 +197,8 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
         visible.push_back(current);
 
         // --- what the composite needs to know about this layer ----------------
-        //
-        // The transform is hashed HERE and not into the layer's own node, which is the
-        // decision that makes the RAM tier worth having: moving a layer changes the
-        // composite and leaves four effect passes untouched.
+        // Transform is hashed here, not into the layer's own node: moving a layer
+        // invalidates the composite but leaves its effect passes cached.
         compositeHash = hashInt(static_cast<std::int64_t>(graph.nodes[
             static_cast<std::size_t>(current)].hash), compositeHash);
         compositeHash = hashTransform(
@@ -223,8 +212,7 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
     }
 
     if (visible.empty()) {
-        // Still a node. An empty composition is a real picture, it is the letterbox and
-        // the frame, and it is as cacheable as any other.
+        // Still a node: an empty composition (letterbox/frame) is a real, cacheable picture.
         RenderNode empty;
         empty.kind = RenderNode::Kind::Composite;
         empty.hash = compositeHash;

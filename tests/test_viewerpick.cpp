@@ -1,9 +1,5 @@
-// Turning a click in the picture into a layer.
-//
-// The maths the viewer hit-tests with, checked without a window. It works by putting the
-// point back through each layer's transform rather than by comparing against a bounding
-// box: a rotated layer's box covers corners that are not the layer, and clicking one of
-// those would select something the user is not pointing at.
+// Viewer hit-test maths, checked without a window. Hit tests go through each layer's
+// transform rather than its bounding box, since a rotated box covers empty corners.
 
 #include <cmath>
 #include <cstdio>
@@ -39,7 +35,7 @@ core::SizeOf sized(double w, double h) {
     return [w, h](const core::Layer&) { return core::LayerSize{w, h}; };
 }
 
-// The same chain the viewer builds and the compositor draws with.
+// The same transform chain the viewer builds and the compositor draws with.
 core::Transform2D unitToWidget(const core::Composition& comp, const core::Layer& layer,
                                const core::SizeOf& sizes, const engine::FrameFit& fit) {
     const core::LayerSize size = sizes(layer);
@@ -59,22 +55,21 @@ bool hits(const core::Composition& comp, const core::Layer& layer,
     return u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0;
 }
 
-// The frame fit is shared with the renderer for exactly one reason: a click two pixels from
-// where the picture was drawn is a click on the wrong layer.
+// FrameFit must match the renderer's, or a click lands on the wrong layer.
 void the_fit_letterboxes_both_ways() {
-    // A 16:9 comp in a tall window: bars top and bottom.
+    // 16:9 comp in a tall window: bars top and bottom.
     const engine::FrameFit tall = engine::frameFit(1920.0, 1080.0, 800.0, 800.0);
     near(tall.width, 800.0, "fills the width");
     near(tall.height, 450.0, "and is letterboxed vertically");
     near(tall.x, 0.0, "flush left");
     near(tall.y, 175.0, "centred vertically");
 
-    // The same comp in a wide window: bars left and right.
+    // Same comp in a wide window: bars left and right.
     const engine::FrameFit wide = engine::frameFit(1920.0, 1080.0, 2000.0, 500.0);
     near(wide.height, 500.0, "fills the height");
     near(wide.width, 888.888888, "and is pillarboxed", 1e-3);
 
-    // And the round trip, which is the property hit testing actually depends on.
+    // Round trip, which hit testing depends on.
     near(tall.toCompX(tall.toTargetX(640.0)), 640.0, "x round trips");
     near(tall.toCompY(tall.toTargetY(360.0)), 360.0, "y round trips");
 }
@@ -93,8 +88,7 @@ void a_click_inside_a_layer_hits_it() {
     check(!hits(comp, layer, sizes, fit, 960.0 + 210.0, 540.0), "just outside it");
 }
 
-// The reason hit testing goes through the transform rather than a box. A layer turned 45
-// degrees has a bounding box whose corners are empty space.
+// A 45-degree layer's bounding box has empty corners; hit-testing must not select there.
 void a_rotated_layer_is_not_its_bounding_box() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1920, 1080, 30.0, 10.0);
@@ -107,10 +101,10 @@ void a_rotated_layer_is_not_its_bounding_box() {
 
     const core::Bounds box =
         core::layerBounds(comp, layer, 0.0, comp.timeContext(), kCompW, kCompH, sizes);
-    // Its box grew: a 400 square turned 45 degrees spans 400*sqrt(2).
+    // A 400 square at 45 degrees spans 400*sqrt(2).
     near(box.width(), 400.0 * std::sqrt(2.0), "the box is the diagonal", 1e-3);
 
-    // A point just inside the box's top-left corner is outside the diamond.
+    // Just inside the box's top-left corner, but outside the diamond.
     const double cx = fit.toTargetX(box.left + 12.0);
     const double cy = fit.toTargetY(box.top + 12.0);
     check(!hits(comp, layer, sizes, fit, cx, cy),
@@ -119,8 +113,7 @@ void a_rotated_layer_is_not_its_bounding_box() {
           "but the middle still does");
 }
 
-// Scale and the parent chain both have to be in the answer, because both change where the
-// pixels ended up.
+// Scale and parent chain both affect where the pixels end up.
 void hit_testing_follows_scale_and_parents() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1920, 1080, 30.0, 10.0);
@@ -133,10 +126,7 @@ void hit_testing_follows_scale_and_parents() {
     const engine::FrameFit fit = engine::frameFit(kCompW, kCompH, 1920.0, 1080.0);
     const core::Layer& kid = *comp.find(child);
 
-    // Where the child ACTUALLY lands, which is not where its own Position says: a parent
-    // scaled about its own anchor relocates its children as well as resizing them. Asking
-    // layerBounds rather than assuming is the point of the test, because that is the same
-    // question the align maths asks and the two must agree.
+    // Parent scale relocates the child, not just resizes it; layerBounds must reflect that.
     const core::Bounds box =
         core::layerBounds(comp, kid, 0.0, comp.timeContext(), kCompW, kCompH, sizes);
     near(box.width(), 200.0, "the parent halved it", 1e-6);
@@ -148,16 +138,12 @@ void hit_testing_follows_scale_and_parents() {
                 fit.toTargetY(box.centerY())),
           "and not past its edge");
 
-    // And it is genuinely somewhere else than an unparented layer would be, or the test
-    // would pass with the parent chain ignored entirely.
+    // Confirms the parent chain is actually being followed, not ignored.
     check(std::fabs(box.centerX() - 960.0) > 1.0,
           "the parent moved it, so the chain is really being followed");
 }
 
-// The ratio a scale drag solves for: how far the grabbed handle now sits from the anchor,
-// against how far it sat the moment it was grabbed, applied to the scale that was true at
-// that moment. Mirrors GpuViewport::mouseMoveEvent's Grab::Scale case in plain arithmetic,
-// checked here without a widget or a GPU device.
+// Scale-drag ratio, mirroring GpuViewport::mouseMoveEvent's Grab::Scale case as plain arithmetic.
 double scaledAxis(double original, double handleCoord, double anchorCoord, double newCoord) {
     const double denom = handleCoord - anchorCoord;
     if (std::fabs(denom) < 1e-3) {
@@ -166,9 +152,7 @@ double scaledAxis(double original, double handleCoord, double anchorCoord, doubl
     return original * (newCoord - anchorCoord) / denom;
 }
 
-// Ground truth: actually set the layer to a target scale, see where that puts the handle
-// on screen, then check the formula recovers that same target scale from that same screen
-// position — the round trip a real drag depends on.
+// Set a target scale, find the resulting handle position, check scaledAxis recovers it.
 void dragging_a_handle_scales_around_the_anchor() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1920, 1080, 30.0, 10.0);
@@ -194,9 +178,7 @@ void dragging_a_handle_scales_around_the_anchor() {
     near(scaledAxis(kOriginal, kHandleU, kAnchorU, u1), kTarget,
         "the recovered scale matches what actually put the handle there");
 
-    // The right-edge handle does not touch Y at all: dragging it leaves the other axis
-    // exactly where it started, which is what makes an edge handle different from a
-    // corner one.
+    // An edge handle doesn't touch the other axis at all, unlike a corner handle.
     near(scaledAxis(kOriginal, 0.5, 0.5, 0.5 /* unmoved */), kOriginal,
         "a handle that has not moved along its axis reports no change");
 }
@@ -209,8 +191,7 @@ void a_layer_with_no_size_is_not_clickable() {
     const core::SizeOf sizes = sized(0.0, 0.0);
     const engine::FrameFit fit = engine::frameFit(kCompW, kCompH, 1920.0, 1080.0);
 
-    // A degenerate transform inverts to the identity rather than to infinities, so this
-    // answers a plain no instead of producing NaNs that travel into a Position value.
+    // A degenerate transform must invert finitely, not to infinities/NaN.
     const core::Transform2D back =
         unitToWidget(comp, *comp.find(id), sizes, fit).inverse();
     check(std::isfinite(back.tx) && std::isfinite(back.a),
@@ -219,12 +200,8 @@ void a_layer_with_no_size_is_not_clickable() {
           "so a click against it produces a number rather than a NaN");
 }
 
-// The two coordinate systems this widget lives in, and the conversion between them.
-//
-// Qt hands out mouse positions and widget sizes in logical points; the swapchain, and
-// therefore everything the compositor computed, is in physical pixels. Mixing them put the
-// handles at half scale in the corner and made every click land on the wrong part of the
-// picture. This is the arithmetic that has to hold.
+// Qt gives logical points; the swapchain/compositor use physical pixels. Mixing them
+// misplaced handles and clicks on high-DPI displays.
 void the_fit_is_taken_in_surface_pixels() {
     constexpr double kLogicalW = 800.0;
     constexpr double kLogicalH = 500.0;
@@ -233,16 +210,13 @@ void the_fit_is_taken_in_surface_pixels() {
         const engine::FrameFit surface =
             engine::frameFit(kCompW, kCompH, kLogicalW * dpr, kLogicalH * dpr);
 
-        // A click at the middle of the widget is the middle of the frame, whatever the
-        // display's scale factor is, PROVIDED the click is scaled with it.
+        // Widget centre must map to frame centre at any DPR, if the click is scaled too.
         const double cx = surface.toCompX(kLogicalW * 0.5 * dpr);
         const double cy = surface.toCompY(kLogicalH * 0.5 * dpr);
         near(cx, kCompW * 0.5, "the centre maps to the centre in x", 1e-6);
         near(cy, kCompH * 0.5, "and in y", 1e-6);
 
-        // And the bug that was shipped: taking the fit in logical pixels while the picture
-        // was drawn in physical ones. At dpr 1 they agree, which is exactly why this was
-        // invisible until it reached a Retina display.
+        // Logical vs. physical pixels only diverge above 1x, hence the per-dpr check below.
         const engine::FrameFit logical =
             engine::frameFit(kCompW, kCompH, kLogicalW, kLogicalH);
         if (dpr == 1.0) {
@@ -254,9 +228,7 @@ void the_fit_is_taken_in_surface_pixels() {
     }
 }
 
-// A text layer is the size of the IMAGE the rasteriser makes, not the size of its ink: the
-// raster pads by the stroke so a heavy outline is not clipped, and the compositor sizes the
-// quad from the image. Checked as arithmetic here, since the rasteriser needs a font stack.
+// Text layer size is the rasterized image (padded by stroke), not the ink bounds.
 void a_stroke_makes_a_text_layer_bigger_than_its_ink() {
     const double inkW = 600.0;
     const double inkH = 180.0;
@@ -267,8 +239,7 @@ void a_stroke_makes_a_text_layer_bigger_than_its_ink() {
     check(paddedW > inkW && paddedH > inkH, "padding grows the layer");
     near(paddedW - inkW, 14.0, "by the stroke plus two, on each side");
 
-    // Which is why measuring one and drawing the other misplaces every handle: the box
-    // would be 14px narrow and centred on the same point, so both edges are wrong.
+    // Mismatched measurement would misplace both edges by this amount.
     near((paddedW - inkW) * 0.5, 7.0, "and the error shows on both edges, not one");
 }
 

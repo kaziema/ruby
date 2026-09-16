@@ -1,8 +1,4 @@
-// Layer bounds and the alignment maths.
-//
-// Aligning is arithmetic on top of the transform stack, and arithmetic that is subtly
-// wrong looks right: a layer lands near the edge instead of on it and you blame yourself.
-// So these check the numbers, not the buttons.
+// Layer bounds and alignment math. Checks the numbers, not the UI buttons.
 
 #include <algorithm>
 #include <cmath>
@@ -63,8 +59,7 @@ void a_centred_layer_is_centred() {
     near(box.height(), 200.0, "as tall as the layer");
 }
 
-// Scale grows the box around the anchor, so a layer at 200% is twice as wide and still
-// centred on the same point.
+// Scale grows the box around the anchor point.
 void scale_grows_the_box() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
@@ -78,8 +73,7 @@ void scale_grows_the_box() {
     near(box.centerX(), kCompW / 2.0, "still centred");
 }
 
-// A rotated layer reports the box that CONTAINS it, not its own tilted rectangle. That is
-// what aligning a rotated layer to an edge has to mean: the thing you can see touches it.
+// A rotated layer reports the containing box, not its own tilted rectangle.
 void rotation_gives_the_containing_box() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
@@ -95,9 +89,7 @@ void rotation_gives_the_containing_box() {
     near(box.height(), 400.0, "and its height");
 }
 
-// The align maths itself, done the way MainWindow does it: measure, work out the gap in
-// composition pixels, convert to the percentage Position is stored in, apply, measure
-// again. The second measurement is the test.
+// The align math MainWindow runs: measure, convert gap to Position's percentage units, apply, remeasure.
 double alignedLeft(core::Composition& comp, core::Layer& layer) {
     const core::TimeContext ctx = comp.timeContext();
     const core::Bounds box =
@@ -129,8 +121,7 @@ void aligning_left_works_on_a_scaled_layer() {
     near(alignedLeft(comp, layer), 0.0, "scale does not throw the alignment off");
 }
 
-// An off-centre anchor moves the layer relative to its Position, so the gap between
-// "where Position says it is" and "where its left edge is" is not half its width.
+// An off-centre anchor changes the gap between Position and the left edge.
 void aligning_left_works_with_an_offset_anchor() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
@@ -140,15 +131,11 @@ void aligning_left_works_with_an_offset_anchor() {
     near(alignedLeft(comp, layer), 0.0, "the anchor does not throw the alignment off");
 }
 
-// A parented layer's Position is in its parent's space. Moving it a distance in
-// composition pixels means asking the parent what that distance is worth, which is what
-// Transform2D::inverse is for. Without it, a layer under a scaled parent lands short.
+// A parented layer's Position is in parent space; needs Transform2D::inverse to convert.
 void aligning_left_works_under_a_scaled_parent() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
-    // The id is taken before the next addLayer, never after: adding a layer can
-    // reallocate the vector, and a reference held across it is a dangling read that in
-    // this codebase has already once looked like a hung test rather than a crash.
+    // Take the id before the next addLayer: it can reallocate the vector, dangling refs.
     const core::LayerId parentId =
         project.addLayer(comp, "parent", core::LayerKind::Solid).id;
     const core::LayerId childId =
@@ -187,8 +174,7 @@ void an_inverse_undoes_its_transform() {
     near(back.applyX(x, y), 7.0, "x round trips", 1e-9);
     near(back.applyY(x, y), 11.0, "y round trips", 1e-9);
 
-    // A collapsed transform has no inverse and must say so by staying put rather than
-    // producing infinities that then travel into a Position value.
+    // A degenerate transform's inverse must stay finite, not produce infinities.
     const core::Transform2D flat = core::Transform2D::scale(0.0, 0.0);
     const core::Transform2D none = flat.inverse();
     check(std::isfinite(none.a) && std::isfinite(none.tx),
@@ -196,9 +182,7 @@ void an_inverse_undoes_its_transform() {
 }
 
 // --- distribute --------------------------------------------------------------
-//
-// The maths MainWindow runs, done here against bounds so it can be checked without a
-// window. Even gaps between the outermost two, which stay where they are.
+// Even gaps between the outermost two layers, which stay where they are.
 void distributing_three_evens_the_gaps() {
     core::Project project;
     core::Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
@@ -222,8 +206,7 @@ void distributing_three_evens_the_gaps() {
             .centerX();
     };
 
-    // Sorted by position, not by stack order: "spread these out" is a statement about the
-    // picture, and where a layer sits in the list has nothing to do with where it is.
+    // Sort by position, not stack order: distribute is about the picture, not the list.
     std::vector<std::pair<double, core::LayerId>> placed = {
         {centreOf(a), a}, {centreOf(b), b}, {centreOf(c), c}};
     std::sort(placed.begin(), placed.end());
@@ -245,8 +228,7 @@ void distributing_three_evens_the_gaps() {
     near(centreOf(b), 500.0, "and the middle one is now exactly between them");
 }
 
-// Two layers cannot be distributed: there is nothing between them to space out. Worth a
-// test because the guard is a magic number and magic numbers get loosened.
+// Two layers can't be distributed; guards against the threshold constant drifting.
 void distributing_needs_three() {
     const std::size_t two = 2;
     check(two < 3, "the threshold is three, and two is not enough");

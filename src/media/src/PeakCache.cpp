@@ -9,8 +9,7 @@
 namespace ruby::media {
 namespace {
 
-// Below this a level is not worth keeping: you cannot see structure in fifty buckets, and
-// the next level down would be twelve.
+// Below this, structure isn't visible; not worth keeping another level.
 constexpr std::size_t kSmallestLevel = 64;
 
 constexpr char kMagic[8] = {'R', 'B', 'Y', 'P', 'E', 'A', 'K', '1'};
@@ -46,9 +45,8 @@ PeakPyramid PeakPyramid::build(const AudioBuffer& buffer) {
     first.high = base.high;
     pyramid.levels_.push_back(std::move(first));
 
-    // Then each level from the one above it, never from the samples again. For min/max
-    // this is exact: the minimum of a group of minima is the minimum of the whole group.
-    // It also means the expensive pass over the samples happens exactly once.
+    // Each level built from the one above, not the samples — exact for min/max, and
+    // keeps the sample pass to once.
     while (pyramid.levels_.back().count() > kSmallestLevel) {
         const PeakLevel& above = pyramid.levels_.back();
         const std::size_t count =
@@ -86,8 +84,7 @@ const PeakLevel* PeakPyramid::levelFor(double secondsPerPixel) const {
     }
     const double pixelsPerSecond = 1.0 / secondsPerPixel;
 
-    // Levels run fine to coarse. Walk to the coarsest one that still gives at least one
-    // bucket per pixel, and stop before it stops doing so.
+    // Levels run fine to coarse; pick the coarsest that still gives >= 1 bucket/pixel.
     const PeakLevel* best = &levels_.front();
     for (const PeakLevel& level : levels_) {
         if (level.bucketsPerSecond < pixelsPerSecond) {
@@ -123,8 +120,7 @@ bool PeakPyramid::save(const std::string& file) const {
             return false;
         }
     }
-    // Temp then rename, so a cache half-written when the app quit is never read back as
-    // if it were whole.
+    // Write to temp then rename, so a half-written cache is never read as complete.
     std::error_code ec;
     std::filesystem::rename(temp, file, ec);
     if (ec) {
@@ -162,8 +158,7 @@ bool PeakPyramid::load(const std::string& file) {
             levels_.clear();
             return false;
         }
-        // A truncated or hostile file must not be able to ask for an enormous allocation
-        // before we have read a single sample of it.
+        // Cap allocation size before trusting a possibly truncated/hostile file.
         if (count == 0 || count > (1ULL << 32)) {
             levels_.clear();
             return false;
@@ -184,9 +179,7 @@ bool PeakPyramid::load(const std::string& file) {
 }
 
 std::string peakCachePath(const std::string& directory, const std::string& mediaPath) {
-    // Path, size and modification time together. Path alone would happily serve the old
-    // peaks for a clip that was re-exported under the same name, which is the most likely
-    // way to end up with a waveform that quietly does not match what you hear.
+    // Path+size+mtime: path alone would serve stale peaks after a same-name re-export.
     std::error_code ec;
     const std::uintmax_t size = std::filesystem::file_size(mediaPath, ec);
     const auto written = std::filesystem::last_write_time(mediaPath, ec);

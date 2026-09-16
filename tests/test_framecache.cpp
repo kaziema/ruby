@@ -1,8 +1,5 @@
-// The RAM tier of the preview cache.
-//
-// A cache that misses is slow. A cache that hits wrongly shows the user a frame that is
-// not the one they are looking at, and the app has no idea anything is wrong. These tests
-// are almost entirely about the second kind.
+// RAM tier of the preview cache. Mostly guards against wrong hits (showing a stale frame
+// with no error), not just misses.
 
 #include <cstdio>
 #include <string>
@@ -22,8 +19,7 @@ void check(bool cond, const std::string& what) {
     }
 }
 
-// A stand-in texture. The cache never looks inside one; it holds a handle and counts the
-// bytes it was told about.
+// Stand-in texture; the cache only holds a handle and the byte count it's told.
 class FakeTexture : public gpu::Texture {
 public:
     FakeTexture(std::uint32_t w, std::uint32_t h) : w_(w), h_(h) {}
@@ -53,8 +49,7 @@ void a_miss_then_a_hit() {
     check(cache.stats().bytes == kEntry, "the bytes are counted, not the entries");
 }
 
-// The budget is in bytes on purpose. A 1080x1920 RGBA16Float texture is about 16MB, so a
-// budget measured in entries would let eight of them quietly become a gigabyte.
+// Budget is bytes, not entry count — a 1080x1920 RGBA16Float texture is ~16MB.
 void the_budget_is_enforced_in_bytes() {
     engine::FrameCache cache(3 * kEntry);
     for (engine::NodeHash i = 1; i <= 3; ++i) {
@@ -67,8 +62,7 @@ void the_budget_is_enforced_in_bytes() {
     check(cache.stats().evictions >= 1, "something was evicted to make room");
 }
 
-// Least recently used, where "used" means found. Otherwise the frame you are sitting on
-// gets evicted by the frames you scrubbed past on the way to it.
+// LRU where "used" means found via find(), not just present.
 void the_oldest_untouched_entry_goes_first() {
     engine::FrameCache cache(3 * kEntry);
     cache.put(1, texture(), kEntry);
@@ -82,9 +76,8 @@ void the_oldest_untouched_entry_goes_first() {
     check(cache.find(2) == nullptr, "the one that was not is gone");
 }
 
-// Looking at the cache must not change the cache. The bar under the ruler asks about
-// hundreds of frames every quarter second, and if that counted as use it would keep alive
-// whatever the bar happened to scan last rather than whatever the user is working on.
+// contains() must not affect LRU order — the cache-bar UI polls hundreds of frames a
+// second and would otherwise keep alive whatever it last scanned.
 void contains_does_not_count_as_use() {
     engine::FrameCache cache(2 * kEntry);
     cache.put(1, texture(), kEntry);
@@ -99,8 +92,7 @@ void contains_does_not_count_as_use() {
     check(!cache.contains(1), "and it was still the least recently used, so it went");
 }
 
-// One entry larger than the whole budget would evict everything and then not fit. Refusing
-// is better than emptying the cache for nothing.
+// An entry bigger than the budget is refused, not allowed to evict everything for nothing.
 void an_entry_too_big_for_the_budget_is_refused() {
     engine::FrameCache cache(2 * kEntry);
     cache.put(1, texture(), kEntry);
@@ -110,8 +102,7 @@ void an_entry_too_big_for_the_budget_is_refused() {
     check(!cache.contains(2), "and the oversized one was not taken");
 }
 
-// Re-putting a key replaces it rather than double counting its bytes, which would slowly
-// convince the cache it was full when it was not.
+// Re-putting a key replaces it rather than double-counting its bytes.
 void putting_the_same_key_twice_replaces_it() {
     engine::FrameCache cache(10 * kEntry);
     cache.put(1, texture(), kEntry);
@@ -120,8 +111,7 @@ void putting_the_same_key_twice_replaces_it() {
     check(cache.stats().bytes == kEntry, "and its bytes counted once");
 }
 
-// Lowering the budget has to take effect immediately, not at the next insertion. A
-// resolution change is the case: everything held is suddenly the wrong size.
+// Lowering the budget evicts immediately, not on next insertion.
 void shrinking_the_budget_evicts_now() {
     engine::FrameCache cache(10 * kEntry);
     for (engine::NodeHash i = 1; i <= 5; ++i) {

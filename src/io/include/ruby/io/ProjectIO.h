@@ -7,16 +7,10 @@
 
 namespace ruby::io {
 
-// Reading and writing `.rbypr` project files.
-//
-// Plain JSON, not a binary blob and not a zip. A project is references and numbers; it
-// carries no assets, so a container buys nothing. The cautionary tale is AE's `.aep`:
-// an opaque big-endian RIFF that nobody can inspect, diff, merge or recover, which is
-// why there is a cottage industry of reverse-engineered parsers for it.
-// JSON is greppable, diffable, and survives a bad byte with the damage visible.
+// Reading and writing `.rbypr` project files. Plain JSON, not a binary/zip container:
+// a project carries no assets, and JSON stays greppable, diffable, and recoverable.
 
-// What went wrong, or what was quietly fixed up. A project that half-loads and says
-// nothing is worse than one that refuses.
+// What went wrong, or what was quietly fixed up.
 struct LoadReport {
     bool ok = false;
     std::string error;             // set when the file could not be read at all
@@ -25,17 +19,16 @@ struct LoadReport {
     [[nodiscard]] bool clean() const noexcept { return ok && notes.empty(); }
 };
 
-// The version stamped into every file we write. Bumped whenever the on-disk shape
-// changes; the loader uses it to decide which migrations to run.
+// Bumped whenever the on-disk shape changes; the loader uses it to pick migrations.
 inline constexpr int kProjectSchema = 1;
 
 [[nodiscard]] bool save(const core::Project& project, const std::string& path,
                         std::string* error = nullptr);
 
-// Never throws and never half-populates: on failure `project` is left untouched.
+// On failure, `project` is left untouched.
 [[nodiscard]] LoadReport load(core::Project& project, const std::string& path);
 
-// Exposed for tests, and for anything that wants a project as a string.
+// Exposed for tests and for string round-tripping.
 [[nodiscard]] std::string toJson(const core::Project& project);
 [[nodiscard]] LoadReport fromJson(core::Project& project, const std::string& text);
 

@@ -1,11 +1,5 @@
-// Tests for the expression sandbox.
-//
-// Most of this file is trying to break out of it. That is the point: expressions arrive
-// from project files and preset packs, which means from strangers, and "we removed the
-// dangerous things" is only worth as much as the attempt to find one we missed.
-//
-// The escape attempts are written as assertions that they FAIL. If one of them ever starts
-// passing, this file is the alarm.
+// Sandbox tests. Expressions come from untrusted project/preset files, so most of this
+// file is escape attempts written to assert failure.
 
 #include <cmath>
 #include <cstdio>
@@ -51,8 +45,7 @@ void it_evaluates_the_ordinary_things() {
     checkNear(box->evaluate("math.floor(3.7)").value.c[0], 3.0, "the maths library is there");
     checkNear(box->evaluate("math.sin(0)").value.c[0], 0.0, "and works");
 
-    // A bare expression and a full chunk both have to work: almost every expression is
-    // the former, and anything with a local variable is the latter.
+    // Both bare expressions and full chunks (with locals) must work.
     checkNear(box->evaluate("40 + 2").value.c[0], 42.0, "a bare expression");
     checkNear(box->evaluate("local a = 40 return a + 2").value.c[0], 42.0,
               "a chunk with its own return");
@@ -73,14 +66,13 @@ void vectors_go_in_and_out() {
     box->set("time", 2.0);
     checkNear(box->evaluate("time * 100").value.c[0], 200.0, "a scalar global");
 
-    // A table of the wrong shape is an error rather than something silently truncated.
+    // Wrong-shape tables error rather than truncate silently.
     check(!box->evaluate("{1, 2, 3, 4, 5}").ok, "five values is refused");
     check(!box->evaluate("{}").ok, "and so is none");
     check(!box->evaluate("'a string'").ok, "and a string");
 }
 
-// The escape attempts. Each of these is a real thing a hostile or careless preset could
-// try, and each has to fail.
+// Each of these is a real thing a hostile/careless preset could try; all must fail.
 void it_cannot_reach_outside_the_process() {
     auto box = script::Sandbox::create();
 
@@ -98,8 +90,7 @@ void it_cannot_reach_outside_the_process() {
     blocked(*box, "debug.sethook(function() end)", "installing its own hook");
     blocked(*box, "collectgarbage('collect')", "stalling in the collector");
 
-    // The libraries are not merely emptied, they are absent. A script cannot tell them
-    // apart from a typo, which is the correct amount of information to give it.
+    // Libraries are absent, not emptied, so a script can't distinguish them from a typo.
     check(!box->evaluate("type(io)").ok || box->evaluate("io == nil").ok,
           "io is not present at all");
 }
@@ -113,8 +104,7 @@ void it_cannot_be_non_deterministic() {
     blocked(*box, "math.random()", "unseeded randomness");
     blocked(*box, "math.randomseed(1)", "seeding the generator");
 
-    // The same expression twice must give the same answer, which is the property all of
-    // the above exist to protect.
+    // Same expression twice must give the same answer.
     const double first = box->evaluate("math.pi * 2").value.c[0];
     const double again = box->evaluate("math.pi * 2").value.c[0];
     checkNear(first, again, "the same expression gives the same answer");
@@ -133,13 +123,11 @@ void a_runaway_expression_is_stopped() {
         box->evaluate("local function f(n) return f(n + 1) end return f(0)");
     check(!recursive.ok, "unbounded recursion is stopped too");
 
-    // And the sandbox is still usable afterwards. A budget overrun that poisoned the
-    // interpreter would turn one bad expression into a broken session.
+    // Sandbox must stay usable after a runaway, not have the budget overrun poison it.
     checkNear(box->evaluate("1 + 1").value.c[0], 2.0,
               "the sandbox still works after a runaway");
 
-    // The hook must not linger. If it did, this next call would inherit a spent counter
-    // and die having done nothing wrong, which is a bug that looks random.
+    // The budget hook must not linger and eat into the next unrelated call.
     for (int i = 0; i < 50; ++i) {
         check(box->evaluate("1 + 1").ok, "and keeps working, run after run");
     }
@@ -195,8 +183,7 @@ void the_ae_globals_are_there() {
     checkNear(box->evaluate("value.y").value.c[0], 80.0, "and by name");
 }
 
-// The line people actually paste. `value + [0, 50]` in AE becomes `value + vec(0, 50)`
-// here, and it has to just work or the shim has nothing to convert to.
+// AE's `value + [0, 50]` becomes `value + vec(0, 50)` here; the shim depends on this working.
 void vectors_do_arithmetic() {
     auto box = script::Sandbox::create();
     box->setInputs(0.0, core::Value::vec2(50.0, 80.0), 1);
@@ -221,8 +208,7 @@ void vectors_do_arithmetic() {
           "equality compares components");
 }
 
-// The property everything else depends on. A render must be reproducible tomorrow, on
-// another machine, and on a farm.
+// Renders must be reproducible across time and machines.
 void wiggle_is_deterministic() {
     auto box = script::Sandbox::create();
     box->setInputs(1.0, core::Value::vec2(100.0, 200.0), 12345);
@@ -235,8 +221,7 @@ void wiggle_is_deterministic() {
     checkNear(first.value.c[0], again.value.c[0], "the same call gives the same answer");
     checkNear(first.value.c[1], again.value.c[1], "in every component");
 
-    // A brand new sandbox, same seed and time: still identical. This is the one that
-    // matters, because it is what a second machine is.
+    // A fresh sandbox with the same seed/time must agree too (simulates a second machine).
     auto other = script::Sandbox::create();
     other->setInputs(1.0, core::Value::vec2(100.0, 200.0), 12345);
     const auto elsewhere = other->evaluate("wiggle(5, 20)");
@@ -264,8 +249,7 @@ void wiggle_actually_moves_and_stays_in_bounds() {
     }
     check(moved, "wiggle actually moves the value rather than returning it unchanged");
 
-    // One octave at amplitude 20 cannot exceed 20. If it does, the amplitude argument is
-    // not doing what its name says and every pasted expression will be wrong by a factor.
+    // One octave at amplitude 20 must not exceed 20.
     check(worst <= 20.0 + 1e-9, "and stays inside the amplitude it was given");
 }
 
@@ -287,8 +271,7 @@ void different_seeds_wiggle_differently() {
 void wiggle_is_smooth() {
     auto box = script::Sandbox::create();
 
-    // Adjacent frames must be close together. Value noise interpolated linearly kinks at
-    // every whole step; smoothstep is what stops a wiggle from ticking.
+    // Adjacent frames must stay close; smoothstep is what keeps wiggle from ticking.
     double previous = 0.0;
     double biggestJump = 0.0;
     for (int frame = 0; frame < 300; ++frame) {
@@ -326,12 +309,8 @@ void the_easing_helpers_match_ae() {
     checkNear(box->evaluate("radiansToDegrees(math.pi)").value.c[0], 180.0, "angle helpers");
 }
 
-// Found by probing, not by reading. A script could reach the vector metatable through
-// getmetatable(value) and overwrite __index, after which every expression evaluated later
-// in the same sandbox read vectors through whatever it had installed.
-//
-// That is a worse failure than any of the filesystem ones above: those stop an expression,
-// this silently makes other people's expressions produce wrong numbers.
+// A script could hijack the vector metatable via getmetatable(value).__index, corrupting
+// every later expression's vector reads in the same sandbox.
 void the_vector_type_cannot_be_tampered_with() {
     auto box = script::Sandbox::create();
     box->setInputs(0.0, core::Value::vec2(10.0, 20.0), 1);
@@ -345,15 +324,14 @@ void the_vector_type_cannot_be_tampered_with() {
     checkNear(box->evaluate("value[1]").value.c[0], 10.0,
               "and the vector type still works afterwards, uncorrupted");
 
-    // setmetatable must refuse too, or the same corruption arrives by another door.
+    // setmetatable must refuse too.
     const auto swap = box->evaluate(
         "(function() setmetatable(value, {}) return 1 end)()");
     check(!swap.ok, "and the metatable cannot be replaced wholesale");
     checkNear(box->evaluate("value[2]").value.c[0], 20.0, "still intact");
 }
 
-// Bad arguments have to fail rather than produce a plausible wrong number, because a
-// plausible wrong number is what somebody ships.
+// Bad arguments must fail rather than produce a plausible wrong number.
 void bad_arguments_are_refused() {
     auto box = script::Sandbox::create();
     box->setInputs(0.0, core::Value::vec2(10.0, 20.0), 1);
@@ -367,19 +345,14 @@ void bad_arguments_are_refused() {
     check(!box->evaluate("linear(0,0,1)").ok, "linear needs all five");
 }
 
-// Found by probing. An expression that writes a global used to write it for the whole
-// sandbox, so `wiggle = function() return 999 end` in one preset silently replaced wiggle
-// for every other expression in the project.
-//
-// That is not an escape from the process, it is a way to corrupt everybody else's output,
-// which is worse: an escape stops working, this produces plausible wrong numbers.
+// A global write from one expression must not leak into another sandbox call/expression.
 void one_expression_cannot_change_another() {
     auto box = script::Sandbox::create();
     box->setInputs(1.0, core::Value::scalar(0.0), 42);
 
     const double before = box->evaluate("wiggle(5, 20)").value.c[0];
 
-    // Every route to the shared globals that the probe found.
+    // Every known route to the shared globals.
     check(box->evaluate("wiggle = function() return 999 end return 1").ok,
           "assigning a global succeeds, harmlessly");
     check(!box->evaluate("_G.wiggle = function() return 999 end return 1").ok,
@@ -398,8 +371,7 @@ void one_expression_cannot_change_another() {
               "and is gone by the next expression");
 }
 
-// The instruction budget bounds time and says nothing about memory: a megabyte can be
-// built in a handful of instructions, and so can a gigabyte.
+// The instruction budget bounds time, not memory; needs its own cap.
 void memory_is_capped_too() {
     auto box = script::Sandbox::create();
 
@@ -407,16 +379,14 @@ void memory_is_capped_too() {
         "local t = {} for i = 1, 500 do t[i] = string.rep('x', 1000000) end return #t");
     check(!bomb.ok, "an expression cannot allocate without limit");
 
-    // And the sandbox survives it. A memory limit that leaves the interpreter unusable
-    // turns one greedy expression into a broken session.
+    // Sandbox must survive the cap being hit.
     checkNear(box->evaluate("1 + 1").value.c[0], 2.0, "the sandbox still works afterwards");
     check(box->evaluate("string.rep('x', 1000)").ok == false ||
               box->evaluate("#string.rep('x', 1000)").value.c[0] == 1000.0,
           "and ordinary string work still succeeds");
 }
 
-// A NaN spreads through every calculation it touches and ends up as a layer that silently
-// does not draw, with nothing anywhere saying why.
+// NaN would silently propagate into a layer that just doesn't draw, with no error.
 void non_finite_results_are_refused() {
     auto box = script::Sandbox::create();
     box->setInputs(0.0, core::Value::scalar(0.0), 1);

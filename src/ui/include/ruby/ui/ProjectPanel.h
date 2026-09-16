@@ -14,9 +14,8 @@ class QLineEdit;
 
 namespace ruby::ui {
 
-// The project panel: compositions and imported media, per the design's three-column
-// list. Custom-painted for the same reason as the timeline and inspector — fixed 22px
-// rows, alternating backgrounds, a colour swatch per row, and a footer strip.
+// Compositions and imported media in a three-column list. Custom-painted like the
+// timeline and inspector: fixed rows, alternating backgrounds, swatch per row, footer.
 class ProjectPanel : public QWidget {
     Q_OBJECT
 
@@ -33,8 +32,7 @@ signals:
     void mediaActivated(core::MediaId media);
     void compositionActivated(core::CompId comp);
 
-    // Footer buttons. The window owns all three, because all three are undoable document
-    // edits and the panel does not do those.
+    // Footer buttons; the window handles these since they're undoable document edits.
     void newCompositionRequested();
 
     // Footage dropped on the New Composition button: make a composition that matches it.
@@ -42,9 +40,8 @@ signals:
     void deleteRequested(bool isComposition, std::uint64_t id);
 
 public:
-    // MIME type carrying a MediaId, so the timeline can accept a drop from here and
-    // reject a drop from anywhere else. Needs its own access specifier: everything after
-    // `signals:` is a signal until one appears, and moc will try to generate this.
+    // MIME type carrying a MediaId. Needs its own access specifier — after `signals:`,
+    // moc treats everything as a signal until one appears.
     static const char* mediaMimeType();
 
 protected:
@@ -69,9 +66,7 @@ private:
         QColor swatch;
         qint64 bytes = 0;
 
-        // Everything the columns do not have room for: resolution, frame rate, path.
-        // Shown on hover, because the panel is narrow and most of this is only wanted
-        // occasionally.
+        // Resolution, frame rate, path — shown on hover since the panel is too narrow.
         QString detail;
     };
 
@@ -79,8 +74,7 @@ private:
     void rebuild();
     void layoutFooter();
 
-    // Left to right along the footer. Deliberately few: AE has six and two of them have
-    // nothing to say in Ruby. See NOTEBOOK 6.11.
+    // Left to right along the footer. Deliberately few buttons.
     QRect newCompRect_;
     QRect deleteRect_;
     QRect countRect_;

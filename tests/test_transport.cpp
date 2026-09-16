@@ -40,8 +40,7 @@ void a_stopped_transport_does_not_move() {
     checkNear(t.time(), 2.0, "and does not move time");
 }
 
-// The whole reason time advances by real elapsed seconds: a slow frame should cost a
-// dropped frame, not turn playback into slow motion.
+// Time advances by wall clock, not tick count: a slow frame drops a frame, not slows down.
 void time_follows_the_wall_clock_not_the_tick_count() {
     Transport t = make();
     t.play();

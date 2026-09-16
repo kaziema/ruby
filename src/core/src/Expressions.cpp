@@ -3,8 +3,7 @@
 namespace ruby::core {
 namespace {
 
-// Thread local so each render thread can own its own interpreter without a lock. See the
-// header: this is the one place a lock cannot go.
+// Thread-local so each render thread owns its interpreter without a lock (see header).
 thread_local ExpressionHost* g_host = nullptr;
 
 }  // namespace
@@ -13,12 +12,9 @@ void setExpressionHost(ExpressionHost* host) { g_host = host; }
 ExpressionHost* expressionHost() noexcept { return g_host; }
 
 std::uint64_t expressionSeed(LayerId layer, std::string_view key) noexcept {
-    // FNV-1a over the property name, then mixed with the layer id.
-    //
-    // Both halves matter and for different reasons. Without the layer id, every layer
-    // carrying the same expression wiggles in perfect sympathy, which looks like a bug and
-    // is the first thing anyone notices. Without the key, Position and Scale on one layer
-    // wiggle together, which looks subtly wrong in a way nobody can name.
+    // FNV-1a over the property key, mixed with the layer id. Both needed: without the layer
+    // id, layers sharing an expression wiggle in sync; without the key, a layer's own
+    // properties wiggle in sync with each other.
     std::uint64_t hash = 1469598103934665603ULL;
     for (const char c : key) {
         hash ^= static_cast<unsigned char>(c);
@@ -41,8 +37,7 @@ Value evaluate(const Layer& layer, const Property& prop, double seconds,
     }
     ExpressionHost* host = expressionHost();
     if (host == nullptr) {
-        // No interpreter installed. Every test that does not care about expressions runs
-        // this path, and so does any tool that reads a project without rendering it.
+        // No interpreter installed — tests and non-rendering tools take this path.
         return keyframed;
     }
 
@@ -52,13 +47,11 @@ Value evaluate(const Layer& layer, const Property& prop, double seconds,
         return keyframed;
     }
 
-    // An expression that returns the wrong shape keeps the keyframed value's shape rather
-    // than changing what the property IS. A scalar arriving on a vec2 Position would
-    // otherwise silently move the layer to the origin in y.
+    // Shape mismatch keeps the keyframed value's shape rather than reinterpreting the
+    // property — else a scalar on vec2 Position would silently zero out y.
     if (out.count != keyframed.count) {
         if (out.count == 1 && keyframed.count > 1) {
-            // A single number broadcast across a vector is the one widening worth doing:
-            // `value[1] * 2` on Position is a real thing people write.
+            // Scalar-to-vector broadcast is the one widening allowed (`value[1] * 2` on Position).
             Value widened = keyframed;
             for (int i = 0; i < widened.count; ++i) {
                 widened.c[static_cast<std::size_t>(i)] = out.c[0];
@@ -67,9 +60,7 @@ Value evaluate(const Layer& layer, const Property& prop, double seconds,
         }
         return keyframed;  // already clamped by Property::evaluate
     }
-    // An expression is subject to the same limits as a keyframe. A script that returns
-    // 4000 for Opacity has to land where a keyframe of 4000 would, or "the hard range"
-    // means "unless you write Lua".
+    // Clamped same as a keyframe would be, or the property's range only holds until you write Lua.
     return prop.clamped(out);
 }
 

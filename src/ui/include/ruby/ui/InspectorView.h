@@ -13,13 +13,9 @@ class QLineEdit;
 
 namespace ruby::ui {
 
-// The merged inspector. The design deliberately collapses AE's Transform panel and
-// Effect Controls panel into one, instead of letting two panels fight for the same
-// dock, so this shows the selected layer's whole property stack in collapsible groups.
-//
-// Custom-painted for the same reason as the timeline: fixed 22px group headers and
-// 21px property rows, a keyframe indicator per row, and right-aligned scrubbable
-// values do not map onto a table view without a fight.
+// Merged inspector: collapses AE's Transform + Effect Controls panels into one,
+// showing the selected layer's property stack in collapsible groups. Custom-painted
+// like the timeline — fixed row heights and scrubbable values don't fit a table view.
 class InspectorView : public QWidget {
     Q_OBJECT
 
@@ -31,12 +27,10 @@ public:
     void setCurrentTime(double seconds);
 
 signals:
-    // A value was scrubbed or typed. The timeline shows the same numbers and may have
-    // gained a keyframe, so it needs to repaint.
+    // Value scrubbed or typed; timeline may need to repaint (numbers, new keyframe).
     void propertyEdited();
 
-    // Undo boundaries. A drag is one step, not one per mouse-move, so the window opens
-    // a gesture on press and closes it on release.
+    // Undo boundaries: window opens the gesture on press, closes it on release.
     void editBegan(const QString& label);
     void editEnded();
 
@@ -48,9 +42,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
 
-    // Right click on a property opens the expression menu. There is nowhere else in the
-    // app to type one, and a property that can carry an expression but gives you no way
-    // to write it is the same lie the Mode column used to tell.
+    // Right click on a property opens the expression menu (the only place to write one).
     void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
@@ -72,8 +64,7 @@ private:
         int effect = -1;  // which effect this group belongs to, -1 for Transform
     };
 
-    // One editable number on screen. A vec2 property contributes two of these, because
-    // you scrub x and y independently.
+    // One editable number on screen; a vec2 property contributes two (x, y scrubbed independently).
     struct ValueField {
         PropRef property;
         int component = 0;

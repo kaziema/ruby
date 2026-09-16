@@ -28,8 +28,7 @@ void checkNear(double a, double b, const char* what, double eps = 1e-6) {
 
 const TimeContext kAt30{30.0, 120.0, false};
 
-// Whatever the easing, a segment has to start where it starts and end where it ends.
-// Everything downstream (the graph editor, retiming, preset application) assumes it.
+// Any easing must still start/end exactly at 0/1; downstream code assumes this.
 void easing_pins_both_endpoints() {
     const double eases[][3] = {{0.0, 0.0, 0.0}, {0.68, 1.0, 0.0}, {0.5, 0.5, 0.12},
                               {1.0, 1.0, 0.4}, {0.0, 1.0, 0.0}};
@@ -45,8 +44,7 @@ void linear_ease_is_close_to_identity() {
     }
 }
 
-// Ease-out means "leave slowly", so early in the segment the value should still be
-// near its start. This is the difference between a preset that snaps and one that flows.
+// Ease-out leaves slowly, so early values should stay near the start.
 void ease_out_holds_near_the_start() {
     const double eased = easeCurve(0.25, 0.9, 0.0, 0.0);
     check(eased < 0.25, "heavy ease-out is behind linear at t=0.25");
@@ -109,16 +107,14 @@ void keys_stay_sorted_and_replace_in_place() {
     checkNear(p.keys[1].value.x(), 1.0, "sorted, middle");
     checkNear(p.keys[2].value.x(), 2.0, "sorted, last");
 
-    // Setting a key where one already exists overwrites rather than duplicating,
-    // which is what the timeline's keyframe navigator does.
+    // Re-keying an existing time overwrites rather than duplicating.
     p.addKey({TimeValue::seconds(1.0), Value::scalar(99.0), Interpolation::Linear, 0, 0, 0},
              kAt30);
     check(p.keys.size() == 3, "re-keying at an existing time does not duplicate");
     checkNear(p.keys[1].value.x(), 99.0, "re-keying replaces the value");
 }
 
-// The payoff of storing time in beats. The same keyframes produce a faster animation
-// on a faster song without anyone editing anything.
+// Beat-authored keyframes retime automatically with tempo.
 void beat_authored_keys_retime_with_tempo() {
     Property p;
     p.addKey({TimeValue::beats(0.0), Value::scalar(0.0), Interpolation::Linear, 0, 0, 0},
@@ -137,11 +133,7 @@ void beat_authored_keys_retime_with_tempo() {
     check(p.evaluate(1.379, slow).x() < 60.0, "at 90bpm that bar is only half done");
 }
 
-// Hard ranges are applied when a value is read, not when it is stored.
-//
-// The distinction is the whole design. Storing clamped would mean an overshoot ease
-// between two legal keys had to be flattened or refused; clamping on read means the curve
-// stays exactly as authored and the picture is simply bounded.
+// Ranges clamp on read, not on store, so an overshoot ease between legal keys stays intact.
 void a_range_clamps_what_evaluation_returns() {
     TimeContext ctx;
     ctx.fps = 30.0;
@@ -155,8 +147,7 @@ void a_range_clamps_what_evaluation_returns() {
     opacity.staticValue = Value::scalar(-50.0);
     checkNear(opacity.evaluate(0.0, ctx).c[0], 0.0, "and under the floor");
 
-    // Two legal keys with a heavy overshoot between them. The stored keys must be left
-    // alone and only the value read out is bounded.
+    // Heavy overshoot between two legal keys; only the read value should be bounded.
     opacity.staticValue = Value::scalar(100.0);
     Keyframe a;
     a.time = TimeValue::seconds(0.0);
@@ -207,8 +198,7 @@ void a_range_applies_to_every_component() {
     checkNear(p.evaluate(0.0, ctx).c[1], 100.0, "y clamps");
 }
 
-// The drag step comes from where the slider ends, so two parameters with the same unit
-// and very different useful ranges do not scrub at the same speed.
+// Drag step scales with the range, not the unit, so wide and narrow controls scrub differently.
 void the_drag_step_follows_the_slider_not_the_unit() {
     const ParamRange narrow = ParamRange::between(0.0, 1.0);
     const ParamRange wide = ParamRange::atLeast(0.0, 400.0);

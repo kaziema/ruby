@@ -24,8 +24,7 @@ using namespace theme;
 namespace {
 
 constexpr int kSearchH = 26;
-// Wide enough for "Composition" and "Video + Audio", which are the longest values. A
-// column that always elides is a column whose contents you have to hover to read.
+// Wide enough for "Composition" / "Video + Audio", the longest values.
 constexpr int kTypeW = 84;
 constexpr int kDurW = 48;
 constexpr int kEdgePad = 8;
@@ -67,9 +66,8 @@ ProjectPanel::ProjectPanel(QWidget* parent) : QWidget(parent) {
 
     search_ = new QLineEdit(this);
     search_->setPlaceholderText(QStringLiteral("Search"));
-    // Click focus only. As the first focusable widget in the window it would otherwise
-    // hold focus from launch, and a QLineEdit swallows the spacebar as text before the
-    // play shortcut ever sees it, so the transport would be dead until you clicked away.
+    // Click focus only: as the first focusable widget it would otherwise steal focus at
+    // launch and eat the spacebar before the play shortcut sees it.
     search_->setFocusPolicy(Qt::ClickFocus);
     search_->setFixedHeight(kSearchH - 8);
     search_->setStyleSheet(
@@ -79,7 +77,7 @@ ProjectPanel::ProjectPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(search_);
     layout->addStretch();
 
-    // Escape hands focus back rather than leaving you stuck in a field you are done with.
+    // Escape returns focus to the window.
     auto* leave = new QShortcut(QKeySequence(Qt::Key_Escape), search_);
     leave->setContext(Qt::WidgetShortcut);
     connect(leave, &QShortcut::activated, this, [this] {
@@ -113,8 +111,8 @@ void ProjectPanel::dragEnterEvent(QDragEnterEvent* e) {
 }
 
 void ProjectPanel::dragMoveEvent(QDragMoveEvent* e) {
-    // Only the New Composition button is a target. Dropping media anywhere else in the
-    // panel it came from means nothing, and accepting it would imply otherwise.
+    // Only the New Composition button accepts a drop; media dropped elsewhere in its
+    // own panel means nothing.
     const bool over = newCompRect_.contains(e->position().toPoint());
     if (over != dropOnNewComp_) {
         dropOnNewComp_ = over;
@@ -183,16 +181,7 @@ void ProjectPanel::rebuild() {
             continue;
         }
 
-        // What KIND of thing this is, the way After Effects' Type column works.
-        //
-        // It used to say HD, SD or 4K, which is a resolution class rather than a type: a
-        // column headed "Type" that answers a different question is worse than no column,
-        // because the reader believes the answer. Resolution moved to the tooltip, where
-        // it is still one hover away.
-        //
-        // AE's own values here are the importer's name, so an H.264 file reads
-        // "ImporterEX". That is a leak of Adobe's plugin architecture into the UI and not
-        // worth copying: nobody has ever wanted to know which importer opened a file.
+        // Media kind for the Type column (not resolution class, not an importer name).
         QString kind = QStringLiteral("Video");
         QColor swatch = kLabelAqua.stripe;
         switch (item.kind) {
@@ -237,15 +226,7 @@ void ProjectPanel::rebuild() {
     }
 }
 
-// Everything in the footer, positioned from one place.
-//
-// The buttons and the item count were both put at kEdgePad, independently, and printed on
-// top of each other. Same mistake as the keyframe navigator sharing Parent's column. Two
-// things that each decide their own position have not been laid out; they have been
-// guessed at twice and happened to agree.
-//
-// So the count starts where the buttons end, by construction rather than by arithmetic
-// somebody has to keep in step.
+// Footer layout in one place: the count starts where the buttons end, by construction.
 void ProjectPanel::layoutFooter() {
     const int y = height() - metrics::kProjectFooterH;
     const int size = metrics::kProjectFooterH - 6;
@@ -253,8 +234,7 @@ void ProjectPanel::layoutFooter() {
     newCompRect_ = QRect(kEdgePad, y + 3, size, size);
     deleteRect_ = QRect(newCompRect_.right() + 7, y + 3, size, size);
 
-    // The count, then the size, sharing what is left. The size stays hard right because
-    // it is the one number that is read by glancing rather than by looking.
+    // Count then size share the remaining width; size stays right-aligned for a glance.
     const int textLeft = deleteRect_.right() + 12;
     const int available = width() - textLeft - kEdgePad;
     countRect_ = QRect(textLeft, y, available / 2, metrics::kProjectFooterH);
@@ -264,9 +244,7 @@ void ProjectPanel::layoutFooter() {
 
 int ProjectPanel::rowAt(int y) const {
     const int top = kSearchH + metrics::kColumnHeaderH;
-    // Painting stops at the footer; hit testing did not, so with enough items the rows
-    // underneath it were selectable and had tooltips while being invisible. Anything the
-    // user cannot see is not something they can be clicking on.
+    // Must match where painting stops, or hidden rows below the footer stay clickable.
     const int bottom = height() - metrics::kProjectFooterH;
     if (y < top || y >= bottom) {
         return -1;
@@ -276,9 +254,7 @@ int ProjectPanel::rowAt(int y) const {
 }
 
 void ProjectPanel::paintEvent(QPaintEvent*) {
-    // Recomputed here rather than only on resize, so the rects can never be stale. It is
-    // six lines of arithmetic and it removes the whole class of bug where geometry and
-    // painting disagree because one of them ran and the other did not.
+    // Recomputed here (not just on resize) so layout and painting can't disagree.
     layoutFooter();
 
     QPainter p(this);
@@ -367,8 +343,7 @@ void ProjectPanel::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing, true);
 
     if (dropOnNewComp_) {
-        // Lit while footage is hovering over it, because a drop target you cannot see is
-        // a drop target you find by accident.
+        // Lit while footage is hovering over it, so the drop target is visible.
         p.fillRect(newCompRect_.adjusted(-2, -2, 2, 2), kAccent);
     } else if (hoverButton_ == 0) {
         p.fillRect(newCompRect_.adjusted(-2, -2, 2, 2), kMenuActive);
@@ -418,8 +393,7 @@ bool ProjectPanel::event(QEvent* e) {
             return true;
         }
         const Row& hit = rows_[static_cast<std::size_t>(row)];
-        // Name first, because the column elides it and this is often the only place the
-        // whole thing is readable.
+        // Name first: the column elides it, so this may be the only full readout.
         QToolTip::showText(help->globalPos(),
                            hit.detail.isEmpty()
                                ? hit.name
@@ -451,8 +425,8 @@ void ProjectPanel::mousePressEvent(QMouseEvent* e) {
         update();
     }
     pressAt_ = pos;
-    // Only media can be dragged out. Dropping a composition onto its own timeline is a
-    // question with no good answer yet.
+    // Only media can be dragged out; dropping a composition on its own timeline is
+    // undefined.
     maybeDragging_ = row >= 0 && !rows_[static_cast<std::size_t>(row)].isComposition;
 }
 

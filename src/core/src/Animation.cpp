@@ -6,9 +6,8 @@
 namespace ruby::core {
 namespace {
 
-// Solves the cubic bezier timing curve with control points (p1x, 0) and (p2x, 1),
-// the same construction CSS timing functions use. Bisection rather than Newton:
-// the curve is monotonic in x, we need about 30 iterations, and it cannot diverge.
+// Cubic bezier timing curve (CSS-style, control points (p1x,0)/(p2x,1)).
+// Bisection, not Newton — curve is monotonic in x so it can't diverge.
 double bezierSolve(double x, double p1x, double p2x) noexcept {
     const auto sampleX = [p1x, p2x](double t) {
         const double u = 1.0 - t;
@@ -66,15 +65,12 @@ double easeCurve(double t, double easeOut, double easeIn, double overshoot) noex
     easeOut = std::clamp(easeOut, 0.0, 1.0);
     easeIn = std::clamp(easeIn, 0.0, 1.0);
 
-    // Influence maps to control point placement: more ease-out drags the first
-    // handle right, holding the value near its start for longer.
+    // More ease-out drags the first control point right, holding the start value longer.
     const double solved = bezierSolve(t, easeOut, 1.0 - easeIn);
     double eased = bezierY(solved, 0.0, 1.0);
 
     if (overshoot > 0.0) {
-        // Classic back-out: the value sails past its target and settles. This is
-        // the assistant's OVER tile, and the shape both graph curves show in the
-        // design's graph-editor screen.
+        // Classic back-out: value sails past target, then settles.
         const double s = overshoot * 2.70158;
         const double u = eased - 1.0;
         eased = 1.0 + (s + 1.0) * u * u * u + s * u * u;
@@ -99,13 +95,8 @@ std::size_t Property::addKey(const Keyframe& k, const TimeContext& ctx) {
     return static_cast<std::size_t>(std::distance(keys.begin(), inserted));
 }
 
-// A value with every component put inside the property's hard range.
-//
-// Applied on the way out rather than on the way in, so the stored number is whatever the
-// user or the file said and the clamp is a property of reading it. That matters for
-// overshoot easing: a bounce past 100% opacity is a legal curve between two legal keys,
-// and the right answer is to render it clamped, not to refuse to store it or to flatten
-// the curve.
+// Clamps to the property's hard range. Applied on read, not write, so overshoot easing
+// (e.g. a bounce past 100% opacity) renders clamped without flattening the stored curve.
 Value Property::clamped(Value v) const noexcept {
     for (int i = 0; i < v.count; ++i) {
         v.c[static_cast<std::size_t>(i)] = range.clamp(v.c[static_cast<std::size_t>(i)]);

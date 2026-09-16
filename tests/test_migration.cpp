@@ -1,12 +1,5 @@
-// The migration harness.
-//
-// This is the piece that decides whether a project saved in 2026 opens in 2036, and it is
-// the one piece that cannot be added later: by the time content is in the wild, whatever
-// was not written down about the old format is gone.
-//
-// Every test here is a bag of parameters and an assertion. No document, no registry, no
-// GPU. That is the whole reason D1 says migrations are pure functions over the serialized
-// bag rather than over live objects.
+// Migration harness tests. Migrations are pure functions over the serialized param bag,
+// so tests here work directly on bags with no document/registry/GPU involved.
 
 #include <cstdio>
 #include <string>
@@ -48,8 +41,7 @@ core::ParamBag::Entry animated(double a, double b) {
 
 // --- the bag itself ----------------------------------------------------------
 
-// Renaming is the commonest migration by a wide margin, and the commonest way to get it
-// wrong is to copy the static value and silently drop the animation with it.
+// Rename must carry keyframes and expression, not just the static value.
 void renaming_carries_the_whole_history() {
     core::ParamBag bag;
     core::ParamBag::Entry e = animated(0.0, 40.0);
@@ -74,9 +66,7 @@ void renaming_something_absent_does_nothing() {
           "a rename from a key old content never had leaves the target alone");
 }
 
-// A unit change that is a pure rescale is the one unit change allowed inside a migration.
-// It has to reach the keyframes too, or an animated parameter migrates to the right value
-// at time zero and the wrong one everywhere else.
+// Rescale must hit every keyframe, not just the value at time zero.
 void scaling_reaches_every_keyframe() {
     core::ParamBag bag;
     bag.set("radius", animated(0.0, 40.0));
@@ -87,8 +77,7 @@ void scaling_reaches_every_keyframe() {
     check(e != nullptr && e->value.c[0] == 0.0, "and so does the static value");
 }
 
-// An expression is deliberately left alone. Rescaling `wiggle(3, 40)` means parsing and
-// rewriting someone's code, and getting that wrong is worse than leaving it for a human.
+// Expressions are left alone; rewriting someone's code is out of scope for a migration.
 void scaling_does_not_rewrite_expressions() {
     core::ParamBag bag;
     core::ParamBag::Entry e = entry(10.0);
@@ -123,8 +112,7 @@ void the_chain_runs_only_the_steps_in_range() {
     check(trail.empty(), "content newer than the target runs nothing");
 }
 
-// Declaration order is a comment; to_schema is the fact. A step appended at the bottom of
-// a list still has to run in the right place.
+// Steps run in version order, not declaration order.
 void steps_run_in_version_order_however_they_were_declared() {
     std::string trail;
     const std::vector<core::MigrationStep> steps = {
@@ -137,8 +125,7 @@ void steps_run_in_version_order_however_they_were_declared() {
     check(trail == "234", "sorted by the version each step produces");
 }
 
-// Most schema bumps add a parameter, and adding is handled by defaults rather than by a
-// migration, so a version with no step is the normal case and not an error.
+// A version with no migration step is normal (defaults handle additions), not an error.
 void a_version_with_no_step_is_not_a_gap() {
     const std::vector<core::MigrationStep> steps = {
         {4, [](core::ParamBag& b) { b.rename("old", "new"); }},
@@ -179,8 +166,7 @@ void a_current_instance_is_left_alone() {
     check(fx.params.size() == before, "parameters intact");
 }
 
-// Content from a newer build is refused, not guessed at. Interpreting unknown parameters
-// with today's schema is how you silently change someone's work.
+// Content from a newer schema is refused, not interpreted with today's schema.
 void content_from_the_future_is_refused() {
     core::EffectInstance fx =
         engine::EffectRegistry::instance().instantiate("core.stylize.vignette");
@@ -194,8 +180,7 @@ void content_from_the_future_is_refused() {
     check(fx.schema == 99, "and the version is not quietly rewritten");
 }
 
-// A key the schema has never heard of is dropped and noted. This is what a corrupt file or
-// a buggy migration looks like from here, and both are worth seeing.
+// Unknown keys are dropped and reported (corrupt file or buggy migration).
 void an_unknown_key_is_dropped_and_reported() {
     core::EffectInstance fx =
         engine::EffectRegistry::instance().instantiate("core.stylize.vignette");
@@ -216,8 +201,7 @@ void an_unknown_key_is_dropped_and_reported() {
     }
 }
 
-// A parameter missing from old content is filled in, and the values a user actually set
-// are never touched by the fill.
+// Missing params get filled in without disturbing values the user actually set.
 void missing_parameters_are_filled_without_disturbing_the_rest() {
     core::EffectInstance fx =
         engine::EffectRegistry::instance().instantiate("core.stylize.vignette");
@@ -246,13 +230,8 @@ void migration_restores_the_schema_owned_parts() {
     check(!fx.params[0].group.empty(), "and so did the group");
 }
 
-// An effect that has actually been through three versions. Every built-in is at schema 1,
-// so this is the only way to reach the branches that matter most.
-//
-//   v1: `blur` (percent-of-diagonal)
-//   v2: renamed to `radius`
-//   v3: added `falloff`, whose legacy_default is 0 because v1 and v2 content had no
-//       falloff at all and must keep looking the way it did
+// Synthetic effect at schema 3 (v1: `blur`, v2: renamed `radius`, v3: added `falloff`
+// with legacy_default 0 since v1/v2 content never had it).
 engine::EffectDef threeVersionEffect() {
     engine::EffectDef def;
     def.schema.id = "core.test.aged";
@@ -284,11 +263,8 @@ engine::EffectDef threeVersionEffect() {
     return def;
 }
 
-// THE rule. A parameter added in v3, loading into content authored at v1, takes its
-// legacy_default and not today's better default. Improving a default must never silently
-// rewrite saved work. This is AE's PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS, and the reason
-// validate() refuses a post-v1 parameter with no legacy_default is so this branch always
-// has something to use.
+// A param added later must take legacy_default for old content, not today's default
+// (AE's PF_ParamFlag_USE_VALUE_FOR_OLD_PROJECTS). Improving a default must not rewrite saved work.
 void old_content_takes_the_legacy_default_not_the_new_one() {
     const engine::EffectDef def = threeVersionEffect();
 
@@ -310,8 +286,7 @@ void old_content_takes_the_legacy_default_not_the_new_one() {
           "and the new parameter took its LEGACY default, not 0.5");
 }
 
-// The same effect, applied fresh today, gets the good default. The two defaults are the
-// whole point: one for new work, one for old.
+// Fresh content gets the current default, not the legacy one.
 void new_content_takes_the_current_default() {
     const engine::EffectDef def = threeVersionEffect();
 
@@ -329,8 +304,7 @@ void new_content_takes_the_current_default() {
           "content authored today gets the current default");
 }
 
-// A retired key is dropped in silence. It was deliberately removed years ago and the user
-// does not need to be told about a decision they were not part of.
+// Retired keys are dropped silently, not reported.
 void a_retired_key_is_dropped_quietly() {
     const engine::EffectDef def = threeVersionEffect();
 

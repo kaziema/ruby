@@ -13,8 +13,7 @@ void RhythmMap::resort() {
 }
 
 void RhythmMap::setLane(MarkerLane lane, std::vector<Marker> markers) {
-    // User markers survive re-analysis. Correcting the detector has to be worth doing,
-    // and it is not if re-running throws the correction away.
+    // User markers survive re-analysis, so correcting the detector isn't wasted on rerun.
     std::erase_if(markers_, [lane](const Marker& m) { return m.lane == lane; });
     for (Marker& m : markers) {
         m.lane = lane;
@@ -169,15 +168,12 @@ int Layer::keyframeCount() const noexcept {
 }
 
 std::vector<Property> defaultTransform() {
-    // Units matter here. Position and anchor are stored as a fraction of the
-    // frame, so a preset built on 1080x1920 lands correctly on 1920x1080.
+    // Position/anchor are stored as a fraction of the frame, so a preset lands
+    // correctly across aspect ratios.
     std::vector<Property> t;
 
-    // Four of the five are deliberately unbounded. A transform is where people do the
-    // things an app did not plan for: a layer flown in from off screen, a scale of -100
-    // to mirror it, twelve rotations for a spin. Clamping any of that would be the app
-    // deciding what an edit is allowed to look like. Only Opacity has a real limit,
-    // because past 100% there is nothing more to show and below 0% nothing less.
+    // Four of five are deliberately unbounded — clamping would mean the app deciding
+    // what an edit can look like. Only Opacity has a real limit (0-100%).
 
     Property anchor;
     anchor.key = "anchor_point";
@@ -191,8 +187,7 @@ std::vector<Property> defaultTransform() {
     position.key = "position";
     position.label = "Position";
     position.unit = SpatialUnit::PercentOfWidth;
-    // Slider covers one frame either side of the frame, because moving a layer in from
-    // outside is the single most common thing anyone does with Position.
+    // Slider extends a frame beyond the edges — moving layers in from off-screen is common.
     position.range = ParamRange::unbounded(-100.0, 200.0);
     position.staticValue = Value::vec2(50.0, 50.0);
     t.push_back(position);
@@ -236,6 +231,21 @@ void adoptTransformRanges(Layer& layer) {
     }
 }
 
+void ensureAudioLevel(Layer& layer) {
+    if (layer.find(kAudioLevelKey) != nullptr) {
+        return;
+    }
+    Property level;
+    level.key = kAudioLevelKey;
+    level.label = "Audio Level";
+    level.group = "Audio";
+    level.unit = SpatialUnit::Decibels;
+    // Hard floor at true silence; no hard ceiling, soft slider to +12dB.
+    level.range = ParamRange::atLeast(0.0, decibelsToLinear(12.0));
+    level.staticValue = Value::scalar(1.0);
+    layer.properties.push_back(level);
+}
+
 // --- Composition -------------------------------------------------------------
 
 bool Composition::hasWorkArea() const noexcept {
@@ -257,11 +267,9 @@ void Composition::workRange(double& startSeconds, double& endSeconds) const noex
 TimeContext Composition::timeContext() const noexcept {
     TimeContext ctx;
     ctx.fps = fps;
-    // A beat lane with a tempo is what makes `beats` time mode meaningful. A vocal-only
-    // map has markers but no grid, so it cannot supply one.
+    // `beats` mode needs a beat lane with tempo; a vocal-only map has markers but no grid.
     ctx.has_beat_map = rhythm.has(MarkerLane::Beat) && rhythm.bpm() > 0.0;
-    // Falls back to a nominal tempo so `beats` mode still resolves in the public build,
-    // where the detector is absent and the map is always empty.
+    // Nominal fallback tempo so `beats` mode still resolves when the detector is absent.
     ctx.bpm = ctx.has_beat_map ? rhythm.bpm() : 120.0;
     return ctx;
 }
@@ -309,9 +317,8 @@ std::size_t Project::usageCount(MediaId media) const noexcept {
 std::size_t Project::removeMedia(MediaId media) {
     const std::size_t affected = usageCount(media);
 
-    // The layers stay; only the link goes. Deleting them would turn "remove this clip from
-    // my project" into "delete my edit", and those are not the same request. A layer with
-    // no media draws a placeholder, which is visible and recoverable.
+    // Layers stay; only the media link goes — removing a clip shouldn't delete the edit.
+    // An unlinked layer draws a placeholder.
     for (Composition& comp : comps_) {
         for (Layer& layer : comp.layers) {
             if (layer.media.has_value() && *layer.media == media) {
@@ -382,6 +389,7 @@ Layer& Project::addLayer(Composition& comp, std::string name, LayerKind kind) {
     layer.inPoint = TimeValue::seconds(0.0);
     layer.outPoint = TimeValue::seconds(comp.duration);
     layer.properties = defaultTransform();
+    ensureAudioLevel(layer);
 
     // Topmost first, matching AE and the design's layer ordering.
     comp.layers.insert(comp.layers.begin(), std::move(layer));

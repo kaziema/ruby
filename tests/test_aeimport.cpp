@@ -1,8 +1,5 @@
-// Tests for the After Effects paste shim.
-//
-// The point of this file is the line between "converted" and "refused". A conversion that
-// silently produces a wrong number is worse than one that says it cannot help, so the
-// cases that must WARN matter as much as the cases that must convert.
+// AE paste shim: the line between "converted" and "refused". A silently wrong number is
+// worse than a refusal, so warn cases matter as much as convert cases.
 
 #include <cstdio>
 #include <cstdlib>
@@ -60,9 +57,7 @@ void indexing_is_told_apart_from_literals() {
     converts("value[0]", "value[1]");
     converts("[0, 50]", "vec(0, 50)");
     converts("foo(bar)[0]", "foo(bar)[1]");
-    // Nested, and the distinction has to hold at every level: the numbers inside a
-    // literal are VALUES and must not shift, while the trailing [0] is an index and must.
-    // Shifting the literal contents would silently change what the expression means.
+    // Nested: literal contents must not shift, only the trailing index.
     converts("[[0, 1], [2, 3]][0]", "vec(vec(0, 1), vec(2, 3))[1]");
     converts("x + [1, 2]", "x + vec(1, 2)");
 }
@@ -73,8 +68,7 @@ void strings_are_left_alone() {
     converts("f(\"var Math. [0,1]\")", "f(\"var Math. [0,1]\")");
 }
 
-// The refusals. Each of these could be guessed at, and each guess would sometimes be
-// silently wrong, which is the one outcome worse than not converting.
+// Each of these could be guessed at, but a wrong guess is worse than refusing.
 void the_things_it_cannot_do_are_reported() {
     warns("a ? b : c", "a ternary");
     warns("thisComp.layer('Null 1')", "thisComp");
@@ -90,8 +84,7 @@ void it_says_what_it_changed() {
     check(c.clean(), "and this one had nothing it could not handle");
 }
 
-// Offering the conversion, rather than performing it. Running this over something that was
-// already Lua would be a fine way to break a working expression.
+// Detection only; running conversion on already-Lua code would break it.
 void it_recognises_what_needs_converting() {
     check(script::looksLikeAfterEffects("value + [0, 50]"), "an array literal is a tell");
     check(script::looksLikeAfterEffects("var x = 1"), "and var");
@@ -105,7 +98,6 @@ void it_recognises_what_needs_converting() {
           "an ordinary index is not an array literal");
 }
 
-// The real test: does the converted text actually run.
 void converted_expressions_evaluate() {
     auto host = script::LuaHost::create();
     script::ScopedHost installed(host.get());

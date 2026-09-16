@@ -1,6 +1,4 @@
-// Undo and redo. The behaviours that matter are the ones people notice when they are
-// wrong: a drag being hundreds of undo steps, redo surviving a new edit, and undo
-// silently doing nothing.
+// Undo/redo: drag coalescing, redo-branch discard on new edit, undo-with-nothing no-op.
 
 #include <cmath>
 #include <cstdio>
@@ -68,8 +66,7 @@ int main() {
     check(history.redo(project), "redo reports success");
     check(std::fabs(opacityOf(project) - 50.0) < 1e-9, "and puts the change back");
 
-    // Undoing and then editing has to discard the redo branch. Keeping it would let you
-    // redo your way into a document that never existed.
+    // A new edit after undo must discard the abandoned redo branch.
     check(history.undo(project), "undo again");
     check(history.canRedo(), "redo is available before the new edit");
     history.record(project, "Set Opacity");

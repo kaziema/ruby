@@ -1,10 +1,5 @@
-// Renders compositions containing every layer kind and every blend mode.
-//
-// There is no GPU readback, so this cannot check pixels. What it can do is drive every
-// path added recently through a real device and catch crashes and validation failures,
-// which is what actually breaks when a new layer kind meets an old assumption.
-//
-// Reports 77 (SKIPPED) with no adapter.
+// Renders every layer kind and blend mode through a real device. No GPU readback, so
+// this catches crashes/validation failures, not pixel correctness. Reports 77 with no adapter.
 
 #include <cstdio>
 #include <cstdlib>
@@ -54,13 +49,12 @@ int main() {
 
     engine::Compositor compositor(*device, gpu::TextureFormat::RGBA16Float);
 
-    // A composition with one of everything, including the kinds that were added today.
+    // One of every layer kind.
     core::Project project;
     core::Composition& comp = project.addComposition("t", 1080, 1920, 30.0, 10.0);
 
     const auto add = [&](const char* name, core::LayerKind kind) -> core::LayerId {
-        // Never hold a Layer& across another addLayer: it inserts at the front and the
-        // reference dies. This has bitten twice already.
+        // addLayer inserts at front; never hold a Layer& across another call.
         const core::LayerId id = project.addLayer(comp, name, kind).id;
         core::Layer* l = comp.find(id);
         l->inPoint = core::TimeValue::seconds(0.0);
@@ -78,7 +72,6 @@ int main() {
     comp.find(solidId)->solidColor = core::Value::rgba(0.2, 0.4, 0.8, 1.0);
     comp.find(textId)->text = "Hello";
 
-    // A layer parented to the null, which is the whole reason nulls exist.
     comp.find(solidId)->parent = nullId;
 
     // Stands in for the texture the UI would rasterise text into.
@@ -94,9 +87,7 @@ int main() {
     engine::Compositor::ExternalTextures external;
     external.emplace(textId, engine::Compositor::External{textTexture, 64, 32});
 
-    // Every blend mode, on the solid, one render each. This is what exercises the
-    // per-mode pipeline cache, including the four that are not implemented and have to
-    // fall back rather than fail.
+    // Exercises the per-mode pipeline cache, including unimplemented modes' fallback.
     const core::BlendMode modes[] = {
         core::BlendMode::Normal,    core::BlendMode::Add,
         core::BlendMode::Screen,    core::BlendMode::Multiply,
@@ -115,18 +106,15 @@ int main() {
     comp.find(solidId)->solidHeight = 80;
     compositor.render(project, comp, 1.0, target, &external);
 
-    // No external textures at all. This is the export path's shape: text with nobody to
-    // rasterise it. It must not crash.
+    // No external textures: the export path's shape (text with nobody to rasterise it).
     compositor.render(project, comp, 1.0, target, nullptr);
 
-    // An external entry for a layer that is not in the composition any more, which is
-    // what a stale cache looks like after a delete.
+    // Stale external entry for a layer no longer in the composition (post-delete cache).
     engine::Compositor::ExternalTextures stale;
     stale.emplace(9999, engine::Compositor::External{textTexture, 64, 32});
     compositor.render(project, comp, 1.0, target, &stale);
 
-    // Rotation and a non-centred anchor, which had no effect at all until the transform
-    // work and so had never been through the render path.
+    // Rotation and off-centre anchor, previously untested through the render path.
     if (core::Property* rot = comp.find(solidId)->find("rotation"); rot != nullptr) {
         rot->staticValue = core::Value::scalar(37.0);
     }
@@ -136,18 +124,14 @@ int main() {
     }
     compositor.render(project, comp, 1.0, target, &external);
 
-    // A parent cycle reaching the renderer. Nothing in the UI can produce this yet, which
-    // is exactly why it is worth proving the render path survives it: unbounded, this is a
-    // frozen window rather than a wrong picture.
+    // Parent cycle: UI can't produce this yet, but unbounded it would hang, not misrender.
     comp.find(nullId)->parent = solidId;  // solid -> null -> solid
     compositor.render(project, comp, 1.0, target, &external);
     device->wait_idle();
     check(true, "a parent cycle renders instead of hanging");
     comp.find(nullId)->parent.reset();
 
-    // Solo. Nothing soloed means everything draws; one soloed layer means only it does.
-    // Both directions rendered, because the second is a whole-composition rule and easy
-    // to get inverted.
+    // Solo: nothing soloed draws everything, one soloed layer draws only it.
     comp.find(solidId)->solo = true;
     compositor.render(project, comp, 1.0, target, &external);
     comp.find(textId)->solo = true;

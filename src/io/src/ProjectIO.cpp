@@ -14,14 +14,11 @@ using json = nlohmann::json;
 using namespace ruby::core;
 
 // --- enums as strings ---------------------------------------------------------
-//
-// Names, not integers. An integer enum in a file format means inserting a value in the
-// middle silently reinterprets every older project, and it makes the file unreadable to
-// a human trying to work out what went wrong.
+// Names, not integers: an integer enum would silently reinterpret older projects if a
+// value were ever inserted mid-list.
 
-// Colours are stored as four numbers. A missing or malformed one leaves the value at its
-// default rather than half-writing it, so a hand-edited file cannot produce a colour that
-// is partly one thing and partly another.
+// Colors are 4 numbers; missing/malformed leaves the value at default rather than
+// half-written.
 void readRgba(const json& obj, const char* key, Value& into) {
     if (!obj.contains(key) || !obj[key].is_array() || obj[key].size() != 4) {
         return;
@@ -144,6 +141,7 @@ const char* name(SpatialUnit u) {
         case SpatialUnit::Degrees:           return "degrees";
         case SpatialUnit::Percent:           return "percent";
         case SpatialUnit::Normalized:        return "normalized";
+        case SpatialUnit::Decibels:          return "decibels";
     }
     return "normalized";
 }
@@ -154,6 +152,7 @@ SpatialUnit spatialUnit(const std::string& s) {
     if (s == "percent-of-diagonal") return SpatialUnit::PercentOfDiagonal;
     if (s == "degrees")             return SpatialUnit::Degrees;
     if (s == "percent")             return SpatialUnit::Percent;
+    if (s == "decibels")            return SpatialUnit::Decibels;
     return SpatialUnit::Normalized;
 }
 
@@ -219,7 +218,7 @@ json write(const Keyframe& k) {
     json out{{"time", write(k.time)},
              {"value", write(k.value)},
              {"interp", name(k.interp)}};
-    // Only write easing that does something. A file full of zeroes is noise.
+    // Only write easing that does something; zeroes are noise.
     if (k.easeIn != 0.0)     out["easeIn"] = k.easeIn;
     if (k.easeOut != 0.0)    out["easeOut"] = k.easeOut;
     if (k.overshoot != 0.0)  out["overshoot"] = k.overshoot;
@@ -243,7 +242,7 @@ json write(const Property& p) {
 json write(const EffectInstance& e) {
     json params = json::array();
     for (const Property& p : e.params) params.push_back(write(p));
-    // `schema` is what lets an older file migrate forward. Never drop it.
+    // `schema` lets an older file migrate forward; never drop it.
     return json{{"effect", e.effectId}, {"schema", e.schema},
                 {"name", e.displayName}, {"enabled", e.enabled},
                 {"expanded", e.expanded}, {"params", std::move(params)}};
@@ -258,7 +257,7 @@ json write(const Layer& l) {
              {"transformExpanded", l.transformExpanded}};
 
 
-    // Only on text layers, for the same reason solids only write their own fields.
+    // Text-only fields.
     if (l.kind == LayerKind::Text) {
         out["text"] = l.text;
         out["fontFamily"] = l.fontFamily;
@@ -273,8 +272,7 @@ json write(const Layer& l) {
         out["strokeWidth"] = l.strokeWidth;
     }
 
-    // Only on solids. Writing these on every layer would put four dead numbers on every
-    // text, footage and null layer in the file.
+    // Solid-only fields.
     if (l.kind == LayerKind::Solid) {
         out["solidColor"] = {l.solidColor.c[0], l.solidColor.c[1], l.solidColor.c[2],
                              l.solidColor.c[3]};
@@ -295,8 +293,7 @@ json write(const Layer& l) {
         for (const EffectInstance& e : l.effects) fx.push_back(write(e));
         out["effects"] = std::move(fx);
     }
-    // The waveform is derived from the media and can be recomputed in milliseconds.
-    // Writing it would bloat the file for nothing.
+    // Waveform is derived from media and cheaply recomputed; not written.
     return out;
 }
 
@@ -315,8 +312,7 @@ json write(const Composition& c) {
     json out{{"id", c.id}, {"name", c.name}, {"width", c.width},
              {"height", c.height}, {"fps", c.fps}, {"duration", c.duration},
              {"layers", std::move(layers)}, {"rhythm", write(c.rhythm)}};
-    // Only when it means something. A pair of zeroes in every file is noise, and it reads
-    // as a work area of no length rather than as the absence of one.
+    // Only when set; a pair of zeroes would read as a zero-length work area, not absence.
     if (c.hasWorkArea()) {
         out["workIn"] = write(c.workIn);
         out["workOut"] = write(c.workOut);
@@ -332,9 +328,8 @@ json write(const MediaItem& m) {
 }
 
 // --- read ----------------------------------------------------------------------
-//
-// Every read is total: a missing or wrong-typed field falls back rather than throwing.
-// Refusing to open a project because one field is odd is how people lose work.
+// Every read is total: missing/wrong-typed fields fall back rather than throw, so one
+// odd field doesn't refuse the whole project.
 
 template <typename T>
 T get(const json& j, const char* key, T fallback) {
@@ -431,16 +426,15 @@ LoadReport fromJson(Project& project, const std::string& text) {
 
     const int schema = get<int>(doc, "schema", 0);
     if (schema > kProjectSchema) {
-        // Refusing is right here. Opening a newer file with an older build would drop
-        // whatever it does not understand, and then saving would destroy it.
+        // Refuse rather than open: an older build would drop what it doesn't understand,
+        // and a subsequent save would destroy it.
         report.error = "saved by a newer version of Ruby (file schema " +
                        std::to_string(schema) + ", this build reads " +
                        std::to_string(kProjectSchema) + ")";
         return report;
     }
 
-    // Build into a fresh project, so a failure halfway cannot leave the caller holding
-    // a half-loaded document.
+    // Build into a fresh project so a failure halfway doesn't leave a half-loaded document.
     Project loaded;
 
     if (doc.contains("media") && doc.at("media").is_array()) {
@@ -450,7 +444,7 @@ LoadReport fromJson(Project& project, const std::string& text) {
                 get<double>(m, "duration", 0.0), get<int>(m, "width", 0),
                 get<int>(m, "height", 0), get<double>(m, "fps", 0.0),
                 get<bool>(m, "hasAudio", false));
-            // Ids are preserved so layer references survive the round trip.
+            // Preserve ids so layer references survive the round trip.
             item.id = get<MediaId>(m, "id", item.id);
             loaded.noteUsedId(item.id);
         }
@@ -504,8 +498,7 @@ LoadReport fromJson(Project& project, const std::string& text) {
                 layer.outPoint = readTime(l.contains("out") ? l.at("out") : json{});
                 layer.blend = blendMode(str(l, "blend", "normal"));
                 layer.enabled = get<bool>(l, "enabled", true);
-                // Defaults to on, so projects written before there was an audio switch
-                // open with their sound audible rather than mysteriously muted.
+                // Defaults on so pre-audio-switch projects open with sound audible.
                 layer.audioEnabled = get<bool>(l, "audioEnabled", true);
 
                 readRgba(l, "solidColor", layer.solidColor);
@@ -536,8 +529,8 @@ LoadReport fromJson(Project& project, const std::string& text) {
                     if (loaded.findMedia(id) != nullptr) {
                         layer.media = id;
                     } else {
-                        // Dangling reference: keep the layer, drop the link. Losing a
-                        // layer because a pool entry went missing is not acceptable.
+                        // Dangling reference: keep the layer, drop the link rather than
+                        // losing the layer.
                         report.notes.push_back("layer \"" + layer.name +
                                                "\" referenced media that is not in the "
                                                "project; it was unlinked");
@@ -571,13 +564,8 @@ LoadReport fromJson(Project& project, const std::string& text) {
         }
     }
 
-    // Break any parent loop the file contains, and say so.
-    //
-    // The render path already survives a cycle, but surviving one is not the same as
-    // keeping it: the document would stay broken, the Parent column would show a link
-    // that goes nowhere sensible, and every later read of it inherits the problem. A file
-    // can arrive this way from a hand edit, a merge, or a version of Ruby with a bug in
-    // it, and the loader is the one place that sees the whole thing at once.
+    // Break any parent loop and report it. The render path survives a cycle but the
+    // document would stay broken, so fix it here where the whole graph is visible.
     for (Composition& comp : loaded.compositions()) {
         for (Layer& layer : comp.layers) {
             if (!layer.parent.has_value() || !hasParentCycle(comp, layer.id)) {
@@ -595,8 +583,8 @@ LoadReport fromJson(Project& project, const std::string& text) {
 }
 
 bool save(const Project& project, const std::string& path, std::string* error) {
-    // Write to a temporary first, then move it into place. A crash halfway through a
-    // direct write leaves a truncated file where the project used to be.
+    // Write to a temp file then rename into place, so a crash mid-write can't truncate
+    // the existing file.
     const std::string temp = path + ".tmp";
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);

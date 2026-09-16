@@ -24,10 +24,8 @@ constexpr int kBtnGap = 4;
 constexpr int kLabelH = 18;
 constexpr int kTargetH = 22;
 
-// The six align glyphs, then the six distribute ones, in the order they are laid out.
-//
-// Drawn from rectangles rather than a font: they are diagrams, not characters, and at
-// 30x24 a diagram made of three rectangles is legible in a way a glyph is not.
+// Six align glyphs, then six distribute ones, in layout order. Drawn from rectangles
+// rather than a font, since a diagram reads better than a glyph at this size.
 void drawAlignGlyph(QPainter& p, int glyph, const QRect& box, const QColor& ink) {
     const double cx = box.center().x() + 0.5;
     const double cy = box.center().y() + 0.5;
@@ -46,8 +44,8 @@ void drawAlignGlyph(QPainter& p, int glyph, const QRect& box, const QColor& ink)
         p.drawRect(QRectF(cx + rule - 0.5, cy - 7.0, 1.0, 14.0));
     }
 
-    // Two layers of different sizes, so which edge is being lined up is unambiguous. Two
-    // identical rectangles would look the same aligned left, centred and right.
+    // Two different-sized bars, so which edge is aligned is unambiguous (identical
+    // rectangles would look the same left/centre/right).
     QColor bar = ink;
     bar.setAlphaF(ink.alphaF() * 0.62F);
     p.setBrush(bar);
@@ -77,9 +75,8 @@ void drawDistributeGlyph(QPainter& p, int glyph, const QRect& box, const QColor&
     p.save();
     p.setPen(Qt::NoPen);
     p.setBrush(ink);
-    // Three bars, evenly spaced. Which edge the spacing is measured from is the only
-    // difference between the three in each direction, and at this size that difference is
-    // not drawable, so all three read as "space these out".
+    // Three evenly spaced bars; the three variants per axis differ only in which edge
+    // spacing is measured from, which isn't drawable at this size.
     for (int i = 0; i < 3; ++i) {
         const double o = -6.0 + i * 6.0;
         if (vertical) {
@@ -135,9 +132,8 @@ void AlignPanel::setSelectionCount(int count) {
         return;
     }
     selectionCount_ = count;
-    // Aligning to a selection of one is aligning a thing to itself: every button would be
-    // live and every one would do nothing. Falling back rather than greying out, because
-    // the user asked to align and there is still a sensible thing to align to.
+    // Falls back to Composition target since aligning a single-item selection to itself
+    // is meaningless.
     if (target_ == Target::Selection && selectionCount_ < 2) {
         target_ = Target::Composition;
     }
@@ -145,9 +141,8 @@ void AlignPanel::setSelectionCount(int count) {
 }
 
 bool AlignPanel::enabled(const Button& b) const {
-    // Distribute needs three: with two there is nothing between them to space out. Align
-    // needs one against the composition, or two against a selection. The same thresholds
-    // AE uses, and for the same arithmetic reasons rather than as a convention.
+    // Distribute needs 3+ (nothing to space with 2). Align needs 1 against composition,
+    // 2+ against a selection.
     if (b.distribute) {
         return selectionCount_ >= 3;
     }
@@ -155,13 +150,8 @@ bool AlignPanel::enabled(const Button& b) const {
 }
 
 void AlignPanel::layoutButtons() {
-    // Six buttons across, narrowed to whatever room there is rather than keeping their
-    // natural width and running off the right edge. This panel lives in a splitter with no
-    // minimum, so "there is always 224px" is not a fact about it, it is a hope.
-    // No lower bound. A minimum width sounds like it protects the buttons and does the
-    // opposite: below it the run stops fitting and goes off the right edge, which is
-    // exactly what it was meant to prevent. A 13px button is small; a button you cannot
-    // see is not there.
+    // Buttons narrow to fit available width rather than running off the edge; no lower
+    // bound, since a minimum would just make them overflow instead.
     const int room = width() - kPad * 2 - kBtnGap * 5;
     const int w = std::max(1, std::min(kBtnW, room / 6));
 
@@ -176,8 +166,7 @@ void AlignPanel::layoutButtons() {
             QRect(kPad + (i - 6) * (w + kBtnGap), y, w, kBtnH);
     }
 
-    // The dropdown starts after the label, measured, not after a number that happened to
-    // clear it in the font this was written in.
+    // Dropdown starts after the label's measured width, not a hardcoded guess.
     QFont small = font();
     small.setPixelSize(type::kColumnHeader);
     labelW_ = QFontMetrics(small).horizontalAdvance(QStringLiteral("Align Layers to:")) + 8;
@@ -221,8 +210,7 @@ void AlignPanel::paintEvent(QPaintEvent*) {
     p.drawText(QRect(kPad, kPad, labelW_, kLabelH), Qt::AlignVCenter | Qt::AlignLeft,
                QStringLiteral("Align Layers to:"));
 
-    // The target dropdown. Composition is the only entry that does anything, so it is the
-    // one that shows; Selection is in the menu and disabled, saying why.
+    // Target dropdown; Composition is the default shown, Selection offered in the menu.
     p.setPen(QPen(kDivider, 1.0));
     p.setBrush(kColumnHeader);
     p.drawRect(targetRect_.adjusted(0, 0, -1, -1));
@@ -257,8 +245,7 @@ void AlignPanel::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Says which of the three states it is in, rather than leaving a row of grey buttons
-    // to be interpreted. A control that is off for a reason should give the reason.
+    // States why the buttons are greyed out, rather than leaving that to guesswork.
     QString note;
     if (selectionCount_ == 0) {
         note = QStringLiteral("Select a layer with a picture to align it.");
@@ -308,10 +295,8 @@ void AlignPanel::mousePressEvent(QMouseEvent* e) {
     }
     const Button& b = buttons_[static_cast<std::size_t>(hit)];
     if (b.distribute) {
-        // The distribute buttons reuse the align enum for their axis: left, centre and
-        // right all distribute horizontally, and the three below them vertically. Which
-        // edge the spacing is measured from is not drawable at 30x24 and is not worth a
-        // second enum to express something the icons cannot show.
+        // Distribute buttons reuse the Align enum for axis (left/centre/right =
+        // horizontal, others vertical) rather than a second enum.
         emit distributeRequested(b.align);
     } else {
         emit alignRequested(b.align, target_);

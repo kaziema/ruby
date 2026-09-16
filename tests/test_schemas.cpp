@@ -1,10 +1,5 @@
-// The schema files in schemas/ are the record of what has shipped.
-//
-// A file nobody checks is a comment in a different directory. These tests make the record
-// load-bearing: change an effect's parameters in code without updating its file and the
-// build fails, at the one moment somebody can still be told to bump the version and write
-// a migration. That is the whole reason the files exist rather than the registry being
-// treated as its own authority.
+// schemas/ is the record of what has shipped. These tests make it load-bearing: an
+// effect changed in code without updating its file fails the build.
 
 #include <cstdio>
 #include <filesystem>
@@ -47,10 +42,8 @@ std::string readFile(const fs::path& p) {
     return ss.str();
 }
 
-// Every registered effect has a file, every file has an effect, and the two agree
-// byte for byte. Byte for byte rather than field by field because the file is meant to be
-// read in a diff, and a formatting change that nobody sees is a formatting change nobody
-// reviewed.
+// Every registered effect has a file and they agree byte for byte (not field by field,
+// so the diff shows any change, even formatting).
 void every_effect_matches_its_recorded_schema() {
     const fs::path dir = schemaDir() / "effects";
     check(fs::exists(dir), "schemas/effects exists");
@@ -90,8 +83,7 @@ void every_effect_matches_its_recorded_schema() {
     }
 }
 
-// The written form has to survive a round trip, or the record cannot be read back to
-// compare a loaded project against.
+// The written form must round-trip, or a loaded project can't be compared against it.
 void a_recorded_schema_parses_back_to_itself() {
     for (const auto& def : engine::EffectRegistry::instance().all()) {
         const std::string text = io::schemaToJson(def.schema);
@@ -106,9 +98,7 @@ void a_recorded_schema_parses_back_to_itself() {
     }
 }
 
-// An unknown unit must be refused, never defaulted. Reading one as `normalized` would
-// silently reinterpret every stored value of that parameter, which is precisely the
-// failure D1's unit rule exists to prevent.
+// An unknown unit must be refused, not defaulted (would silently reinterpret stored values).
 void an_unknown_unit_is_refused() {
     const std::string text = R"({
       "id": "core.test.thing", "schema": 1, "display_name": "Thing",
@@ -130,9 +120,8 @@ void a_malformed_schema_does_not_half_load() {
     check(out.id == "untouched", "and the target is left alone on failure");
 }
 
-// The preset schemas are JSON Schema documents. Nothing loads presets yet, so what can be
-// checked is that the documents are well formed and that the worked example agrees with
-// them on the things that matter: required keys, enums, and the container's identity.
+// Nothing loads presets yet; check the JSON Schema docs are well formed and the worked
+// example agrees on required keys, enums, and identity.
 void the_preset_schemas_are_well_formed() {
     for (const char* name : {"manifest.schema.json", "content.schema.json"}) {
         const fs::path p = schemaDir() / "preset" / name;
@@ -163,9 +152,7 @@ void the_example_preset_agrees_with_the_manifest_schema() {
               "the example manifest has required key \"" + key.get<std::string>() + "\"");
     }
 
-    // additionalProperties is false, so a key in the example that the schema does not
-    // describe is a real error, not a nicety. This is the check that catches a field
-    // invented in the example and never added to the format.
+    // additionalProperties is false, so an undescribed key in the example is a real error.
     const json& props = schema.at("properties");
     for (const auto& [key, value] : example.items()) {
         (void)value;
@@ -195,8 +182,7 @@ void the_example_content_agrees_with_its_schema() {
     check(example.at("layers").is_array() && !example.at("layers").empty(),
           "a fragment is at least one layer");
 
-    // The example must reference an effect that exists, or the worked example teaches a
-    // preset that cannot load.
+    // The example must reference a real effect, or it teaches a preset that can't load.
     for (const json& layer : example.at("layers")) {
         for (const json& fx : layer.value("effects", json::array())) {
             const std::string id = fx.value("effect", std::string{});

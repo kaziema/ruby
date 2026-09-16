@@ -8,31 +8,16 @@
 
 namespace ruby::media {
 
-// A mipmap of waveform peaks, plus the on-disk cache for it.
-//
-// Why a pyramid and not one array of peaks: the timeline zooms from a whole composition
-// down to two frames. Drawing from a single fixed bucket rate means either summarising
-// millions of buckets on every repaint when zoomed out, or drawing four buckets across
-// the whole track when zoomed in. Olive hit exactly this, diagnosed it as wanting
-// "mipmapping textures", and has it open as an unfixed issue. It is much cheaper to build
-// the levels up front than to retrofit them, so they are built up front.
-//
-// Why conforming at all: decoding on demand cannot keep up with scrubbing. Every serious
-// editor decodes once into a cheap-to-read form. AE writes a .cfa, Olive conforms to PCM,
-// Kdenlive writes a levels file. This is Ruby's version of that.
+// Mipmap of waveform peaks, precomputed since a fixed bucket rate can't serve both
+// full-zoom-out and near-sample zoom-in, and decoding on demand can't keep up with
+// scrubbing.
 
-// The base rate: 150 buckets per second.
-//
-// Kdenlive uses 5 points per video frame so the waveform lines up with the frame ruler.
-// Ruby cannot do that: media is pooled at the app level and the same clip can be used in
-// compositions at 24, 30 and 60fps, so a rate tied to one composition would mean
-// recomputing per composition. 150/sec is 5 points per frame at 30fps and finer than one
-// frame at any rate anyone edits at, which keeps the intent without the coupling.
+// 150/sec: not tied to any one composition's frame rate (media is pooled across
+// compositions at different fps), and finer than any rate anyone edits at.
 inline constexpr double kBasePeaksPerSecond = 150.0;
 
-// Each level is a quarter the resolution of the one before. Four is coarse enough to
-// climb an hour of audio in a handful of levels and fine enough that the level you land
-// on is never more than 4x more data than you needed.
+// Each level is 1/4 the resolution of the one before: reaches an hour of audio in a
+// handful of levels without ever overshooting by more than 4x.
 inline constexpr int kPeakLevelRatio = 4;
 
 struct PeakLevel {
@@ -46,26 +31,20 @@ struct PeakLevel {
 
 class PeakPyramid {
 public:
-    // Builds the base level from the samples, then halves-of-halves from the level above
-    // rather than from the samples again. Summarising a summary is exact for min/max: the
-    // minimum of a set of minima is the minimum of the union. It would not be for RMS,
-    // which is a reason to keep min/max rather than move to RMS later.
+    // Builds the base level from samples, then each level above from the one below
+    // (exact for min/max, unlike RMS — keep that in mind before switching metrics).
     static PeakPyramid build(const AudioBuffer& buffer);
 
-    // The level to draw at, given how much time one pixel covers.
-    //
-    // Returns the coarsest level that still has at least one bucket per pixel. Coarser
-    // than that visibly loses transients; finer just reads memory you then throw away.
-    // Never returns null for a non-empty pyramid: an over-zoomed request falls back to
-    // the finest level there is.
+    // Coarsest level with >= 1 bucket per pixel. Never null for a non-empty pyramid;
+    // falls back to the finest level when over-zoomed.
     [[nodiscard]] const PeakLevel* levelFor(double secondsPerPixel) const;
 
     [[nodiscard]] const std::vector<PeakLevel>& levels() const noexcept { return levels_; }
     [[nodiscard]] bool empty() const noexcept { return levels_.empty(); }
     [[nodiscard]] double duration() const noexcept { return duration_; }
 
-    // Both are best-effort. A cache that fails to read is a cache miss, never an error:
-    // the samples are still on disk and can always be decoded again.
+    // Best-effort: a failed load is a cache miss, not an error, since the source can
+    // always be redecoded.
     bool save(const std::string& file) const;
     bool load(const std::string& file);
 
@@ -74,19 +53,13 @@ private:
     double duration_ = 0.0;
 };
 
-// Where a file's peaks are cached, given a directory to keep them in.
-//
-// Keyed on the path, size and modification time together. Path alone would serve stale
-// peaks for a re-exported clip that kept its name, which is the single most likely way to
-// get a waveform that silently does not match its audio.
+// Cache path for a file's peaks, keyed on path+size+mtime so a re-exported clip that
+// kept its name doesn't get served stale peaks.
 [[nodiscard]] std::string peakCachePath(const std::string& directory,
                                         const std::string& mediaPath);
 
-// Whether a clip's peaks are ready to draw.
-//
-// "Not ready yet" is a value, not an error and not silence. Olive makes this explicit as
-// kWaitingForConform, and it is worth copying: without it every caller invents its own
-// guess about whether an empty waveform means quiet or means wait.
+// Whether a clip's peaks are ready. Distinct "not ready yet" state so callers don't
+// have to guess whether an empty waveform means silence or means wait.
 enum class ConformState {
     Absent,   // never asked for
     Working,  // decoding now

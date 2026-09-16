@@ -7,16 +7,11 @@ class QPainter;
 
 namespace ruby::ui {
 
-// Drawn rather than set in a font. Text glyphs were tried first and are actively
-// wrong: several have Unicode emoji presentation, so the hand rendered as a
-// full-colour emoji and broke the tool bar's monochrome run.
-//
-// These are drawn as vector paths instead. No font dependency, monochrome by
-// construction, correct at any DPI.
+// Drawn as vector paths, not font glyphs: some glyphs have emoji presentation and
+// rendered in full color, breaking the monochrome toolbar.
 
 enum class ToolIcon {
-    // Reserved for the project selector window. Drawn but inert for now, and dimmed so
-    // that reads as "not yet" rather than as a button that ignores you.
+    // Reserved for the project selector; drawn but inert, dimmed to read as "not yet".
     Home,
 
     Selection,
@@ -28,15 +23,14 @@ enum class ToolIcon {
     Shape,
     Pen,
 
-    // Panel switches rather than tools: they change what the left dock shows instead of
-    // changing what a click in the viewer means. Same bar because they are the same kind
-    // of reach, and separated from the tools by a divider so the difference is visible.
+    // Panel switches, not tools: change the left dock rather than click behavior.
+    // Same bar, divided from the tools to keep the difference visible.
     Project,
     Effects,
 };
 
-// Paints the icon centred in `box`, tinted `color`. Geometry is authored in a
-// 16x16 space and scaled to fit, so call sites only pass the button rect.
+// Paints the icon centered in `box`, tinted `color`; geometry is authored in a
+// 16x16 grid and scaled to fit.
 void paintToolIcon(QPainter& p, const QRect& box, ToolIcon icon, const QColor& color);
 
 }  // namespace ruby::ui

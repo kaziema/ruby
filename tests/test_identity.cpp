@@ -1,6 +1,4 @@
-// Effect and parameter identity.
-// These make the identity rules executable: a violation fails the build instead of
-// silently breaking every preset ever made.
+// Effect/parameter identity rule tests; a violation fails the build instead of breaking presets.
 
 #include <cstdio>
 #include <cstdlib>
@@ -36,9 +34,7 @@ EffectSchema good_effect() {
     s.id = "core.blur.directional";
     s.schema = 1;
     s.display_name = "Directional Blur";
-    // Designated rather than positional. The positional form broke the moment ParamSpec
-    // grew a field in the middle, which is exactly the fragility this struct's own rules
-    // are about.
+    // Designated init: positional broke when ParamSpec grew a field in the middle.
     s.params = {
         ParamSpec{.key = "amount",
                   .label = "Amount",
@@ -93,8 +89,7 @@ void retired_keys_can_never_be_reused() {
     check(mentions(validate(s), "retired"), "reusing a retired key is rejected");
 }
 
-// The AE lesson: changing a default silently rewrites saved work unless the old
-// default is pinned for pre-existing content.
+// A changed default silently rewrites saved work unless the old one is pinned.
 void params_added_later_need_a_legacy_default() {
     EffectSchema s = good_effect();
     s.schema = 2;
@@ -113,8 +108,7 @@ void params_added_later_need_a_legacy_default() {
     check(validate(s).empty(), "same param with a legacy_default validates clean");
 }
 
-// A range that cannot be used is worse than one that obviously does not work, because it
-// looks fine in a screenshot.
+// An unusable range that still looks fine visually is worse than an obviously broken one.
 void nonsense_ranges_are_rejected() {
     {
         EffectSchema s = good_effect();
@@ -127,8 +121,7 @@ void nonsense_ranges_are_rejected() {
         check(mentions(validate(s), "cannot be dragged"), "slider with no span");
     }
     {
-        // The slider running past the clamp means the last stretch of it does nothing,
-        // which reads as a broken control rather than a deliberate limit.
+        // Slider running past the clamp: the last stretch of it would do nothing.
         EffectSchema s = good_effect();
         s.params[0].range = ParamRange{0.0, 10.0, 0.0, 50.0};
         check(mentions(validate(s), "above the hard maximum"), "slider past the clamp");
@@ -149,8 +142,7 @@ void nonsense_ranges_are_rejected() {
     }
 }
 
-// Widening a limit cannot break anything. Tightening one changes what a stored value
-// evaluates to, which is a behaviour change and costs a schema bump like any other.
+// Widening a range is free; tightening one changes stored values and needs a schema bump.
 void tightening_a_range_costs_a_bump() {
     const EffectSchema before = good_effect();
 

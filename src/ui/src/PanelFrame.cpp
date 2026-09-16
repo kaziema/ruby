@@ -26,13 +26,8 @@ namespace {
 
 constexpr const char* kTabMime = "application/x-ruby-tab";
 
-// Live frames, by id.
-//
-// A drag has to name its source frame, and the obvious way is to put the pointer in the
-// mime data. That works right up until the source is destroyed mid-drag, and then it is a
-// crash nobody can reproduce. An id looked up in a registry of frames that are definitely
-// alive cannot dangle: the worst case is a lookup that finds nothing, which is a drop that
-// does nothing.
+// Live frames, by id. An id (not a raw pointer) in the drag's mime data can't dangle if
+// the source frame is destroyed mid-drag; worst case is a lookup miss, not a crash.
 std::map<quintptr, PanelFrame*>& registry() {
     static std::map<quintptr, PanelFrame*> frames;
     return frames;
@@ -145,8 +140,7 @@ protected:
                                                          textRect.width()));
         }
 
-        // Where a dragged tab would land. One line, at the seam it would be inserted at,
-        // rather than a grid of zones asking you to pick a side of the panel.
+        // Insertion seam for a dragged tab.
         if (dropAt_ >= 0) {
             const int x = dropAt_ < tabRects_.size() ? tabRects_.at(dropAt_).left()
                           : tabRects_.isEmpty()      ? 0
@@ -220,17 +214,14 @@ protected:
         update();
     }
 
-    // How much room the tabs have is now part of how wide they are, so the strip has to
-    // lay them out again when the panel is resized. Without this the fit is only correct
-    // until the first time the window changes size.
+    // Tab width depends on available room, so relayout on resize.
     void resizeEvent(QResizeEvent* e) override {
         QWidget::resizeEvent(e);
         layoutTabs();
         update();
     }
 
-    // A squeezed tab reads "Pooled M…", and the only other place the full name appears is
-    // the panel it opens. Say it on hover rather than making someone click to find out.
+    // Tooltip with the full label when a squeezed tab elides it.
     bool event(QEvent* e) override {
         if (e->type() != QEvent::ToolTip) {
             return QWidget::event(e);
@@ -268,8 +259,7 @@ protected:
 
 private:
     static constexpr int kPadX = 9;
-    // The narrowest a tab is allowed to get before the others start giving up width:
-    // the dot, both pads, and enough room for a couple of characters and the ellipsis.
+    // Floor width: dot + pads + a couple chars + ellipsis.
     static constexpr int kMinTabW = 46;
     static constexpr int kDotW = 10;
 
@@ -282,8 +272,7 @@ private:
         mime->setData(kTabMime, QByteArray::number(static_cast<qulonglong>(frameId)) +
                                     ':' + QByteArray::number(index));
 
-        // The tab itself under the cursor, drawn the way it looks in the strip. A drag
-        // that shows you what you picked up is a drag you can trust before you release.
+        // Drag badge: the tab drawn as it looks in the strip.
         const QRect r = tabRects_.at(index);
         QPixmap badge(r.size());
         badge.fill(kTabActiveBg);
@@ -311,12 +300,8 @@ private:
         drag->exec(Qt::MoveAction);
     }
 
-    // Tabs are laid out at their natural width until they stop fitting, and then they
-    // share out the strip instead.
-    //
-    // They used to keep their natural width whatever happened, which meant a tab dragged
-    // into a full panel was painted past the right edge: still there, still in the stack,
-    // but invisible and impossible to click. A tab you cannot get back is a tab you lost.
+    // Natural width until tabs stop fitting, then they share the strip's width so none
+    // ever renders off-edge and unclickable.
     void layoutTabs() {
         const QFontMetrics fm(font());
         tabRects_.clear();
@@ -337,11 +322,8 @@ private:
         QList<int> widths = natural;
 
         if (total > avail) {
-            // Shrink the wide ones first. Every tab keeps a floor wide enough to stay a
-            // target you can hit and drag, and whatever is left over is shared out in
-            // proportion to how much each tab wanted above that floor. Squeezing them
-            // all by the same percentage would take as much off "fx" as off "Pooled
-            // Media", and "fx" has nothing to give.
+            // Every tab keeps a floor width; extra space above that is shared out
+            // proportional to demand (a flat percentage cut would starve short tabs).
             int floors = 0;
             int wanted = 0;
             for (const int w : natural) {
@@ -350,9 +332,7 @@ private:
             }
 
             if (floors >= avail || wanted <= 0) {
-                // More tabs than the strip has room for even at the floor. Split it
-                // evenly: past this point every tab is a dot and a sliver, and the only
-                // thing left worth preserving is that all of them are still reachable.
+                // Not even room for floors; split evenly so all tabs stay reachable.
                 for (int i = 0; i < widths.size(); ++i) {
                     widths[i] = avail / widths.size();
                 }
@@ -366,8 +346,7 @@ private:
                 }
             }
 
-            // Integer division loses a few pixels across the run. Give them to the last
-            // tab so the strip ends exactly at its right edge rather than a gap short.
+            // Give integer-division remainder pixels to the last tab.
             int laid = 0;
             for (const int w : widths) {
                 laid += w;
@@ -391,9 +370,7 @@ private:
         return -1;
     }
 
-    // Which seam between tabs a drop at this x belongs to. Past the halfway point of a
-    // tab means after it, which is what makes dropping on the right half of the last tab
-    // put the new one at the end rather than before it.
+    // Seam a drop at this x belongs to; past a tab's midpoint counts as after it.
     [[nodiscard]] int seamAt(const QPoint& pos) const {
         for (int i = 0; i < tabRects_.size(); ++i) {
             const QRect r = tabRects_.at(i);
@@ -416,9 +393,7 @@ private:
 // --- PanelFrame --------------------------------------------------------------
 
 PanelFrame::PanelFrame(const QStringList& tabs, QWidget* parent) : QWidget(parent) {
-    // 1px inset so the panel border painted in paintEvent is never covered by
-    // the tab strip or the page content. Depth in this design comes entirely from
-    // 1px borders and value steps, so the border has to actually be visible.
+    // 1px inset keeps the border painted in paintEvent visible under the strip/page.
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(1, 1, 1, 1);
     layout->setSpacing(0);
@@ -434,8 +409,7 @@ PanelFrame::PanelFrame(const QStringList& tabs, QWidget* parent) : QWidget(paren
     registry().emplace(id, this);
 
     strip_->onActivate = [this](int index) {
-        // Only follow the tab when there is a page for it. Panels whose tabs describe
-        // one shared page (the timeline) just get the signal.
+        // Only switch pages if one exists for this tab (timeline tabs share one page).
         if (index < stack_->count()) {
             stack_->setCurrentIndex(index);
         }
@@ -445,13 +419,11 @@ PanelFrame::PanelFrame(const QStringList& tabs, QWidget* parent) : QWidget(paren
     strip_->onDropTab = [this](quintptr sourceId, int sourceTab, int at) {
         const auto found = registry().find(sourceId);
         if (found == registry().end()) {
-            return;  // the source is gone; a drop that does nothing beats a crash
+            return;  // source gone
         }
         PanelFrame* source = found->second;
 
-        // Reordering inside one frame. Taking the tab out first shifts everything after
-        // it down by one, so a drop meant for a later seam has to come back by one too.
-        // Getting this wrong makes a tab dragged one place to the right not move at all.
+        // Reordering in place: removing the tab shifts later seams back by one.
         if (source == this && sourceTab < at) {
             --at;
         }
@@ -487,8 +459,7 @@ void PanelFrame::setTabs(const QStringList& tabs) { strip_->setLabels(tabs); }
 void PanelFrame::setTabsMovable(bool movable) {
     movable_ = movable;
     strip_->movable = movable;
-    // A frame whose tabs are not pages must not accept them either. Dropping the Inspector
-    // onto the timeline's composition list would leave a tab with no page behind it.
+    // Non-page tab strips (e.g. timeline's) must reject drops too.
     strip_->setAcceptDrops(movable);
 }
 

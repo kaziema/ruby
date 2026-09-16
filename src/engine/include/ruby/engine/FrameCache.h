@@ -9,35 +9,28 @@
 
 namespace ruby::engine {
 
-// The RAM tier of the preview cache (D9).
+// RAM tier of the preview cache. Holds each layer's finished effect output, keyed on the
+// layer's node hash (not whole frames — transform hashes into the composite, so moving a
+// layer only costs a recomposite, not re-running effects).
 //
-// Holds each layer's finished effect output, keyed on that layer's node hash. Not whole
-// frames: a transform is hashed into the composite rather than into the layer, so moving
-// a layer costs a recomposite of a handful of quads and re-runs nothing. Compositing is
-// milliseconds; four effect passes are not.
+// Content-addressed, never explicitly invalidated: a changed input just produces a
+// different key, and the stale entry ages out via LRU. No dependency tracking to get wrong.
 //
-// Content addressed, never invalidated. Nothing sends this a message saying "layer 3
-// changed". A changed input simply produces a different key, the new entry is rendered,
-// and the old one ages out. Dependency tracking with explicit invalidation is where cache
-// bugs live, and they are the worst kind: the picture is wrong and the app is certain it
-// is right.
-//
-// The disk tier is not here. It needs whole composited frames read back off the GPU, and
-// GpuDevice has no readback path at all yet, so that is its own piece of work.
+// Disk tier isn't implemented here (needs GPU readback, which doesn't exist yet).
 class FrameCache {
 public:
-    // Bytes, not entries. A 1080x1920 RGBA16F texture is about 16MB, so counting entries
-    // would let eight of them quietly become a gigabyte.
+    // Bytes, not entries: texture sizes vary too much (e.g. ~16MB for 1080x1920 RGBA16F)
+    // for an entry count to bound memory.
     explicit FrameCache(std::size_t budgetBytes);
 
     // Null on a miss. A hit moves the entry to the front of the eviction order.
     [[nodiscard]] gpu::TextureHandle find(NodeHash key);
 
-    // Ignored when a single entry is larger than the whole budget, rather than evicting
-    // everything to make room for something that will immediately evict itself.
+    // Ignored if a single entry exceeds the whole budget, rather than evicting everything
+    // to fit something that would immediately evict itself.
     void put(NodeHash key, gpu::TextureHandle texture, std::size_t bytes);
 
-    // Everything goes. For a resolution change or a project close, where every key is
+    // Drops everything. For a resolution change or project close, where every key is
     // stale but nothing would tell the cache so.
     void clear();
 
@@ -54,10 +47,8 @@ public:
     [[nodiscard]] const Stats& stats() const noexcept { return stats_; }
     void resetCounters() noexcept;
 
-    // Whether a key is held, without counting as a hit or moving it up the order.
-    //
-    // For the cache bar in the ruler: drawing what is ready must not change what is ready,
-    // or the act of looking at the cache reorders it.
+    // Whether a key is held, without counting as a hit or reordering it — for the ruler's
+    // cache bar, so drawing it doesn't itself perturb the cache.
     [[nodiscard]] bool contains(NodeHash key) const noexcept;
 
 private:

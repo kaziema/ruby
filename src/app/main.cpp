@@ -17,14 +17,11 @@ int main(int argc, char** argv) {
     QApplication::setStyle(QStringLiteral("Fusion"));
     app.setPalette(ruby::ui::theme::palette());
     app.setStyleSheet(ruby::ui::theme::styleSheet());
-    // The design caps UI transitions at 80ms; a tooltip that takes a second to appear
-    // is the same complaint in slower form.
+    // UI transitions are capped at 80ms; tooltip fade blows past that.
     QApplication::setStyle(QApplication::style());
     qApp->setEffectEnabled(Qt::UI_AnimateTooltip, false);
 
-    // A .rbypr on the command line is a project to open; anything else is media for the
-    // demo composition. Sorting them by extension rather than by a flag is what
-    // double-clicking a project in the Finder will hand us anyway.
+    // .rbypr opens a project; everything else is demo media (matches Finder double-click args).
     std::string projectPath;
     std::vector<std::string> mediaPaths;
     for (int i = 1; i < argc; ++i) {
@@ -37,16 +34,12 @@ int main(int argc, char** argv) {
     }
     ruby::ui::demo::setMediaPaths(std::move(mediaPaths));
 
-    // The expression interpreter for this thread. Installed here, at the top, rather than
-    // created lazily somewhere deep: an interpreter that appears on first use is one whose
-    // lifetime nobody can reason about, and this one has to outlive every render.
-    //
-    // Null is a legal state. Without it, expressions fall back to their keyframed values
-    // and everything else carries on, which is what the seam in core is for.
+    // Installed eagerly (not lazily) so its lifetime is well-defined; must outlive every render.
+    // Null is legal — expressions just fall back to keyframed values.
     std::unique_ptr<ruby::script::LuaHost> expressions = ruby::script::LuaHost::create();
     ruby::script::ScopedHost installed(expressions.get());
 
-    // The device belongs to the application and outlives every window that uses it.
+    // Owned by the app; outlives every window that uses it.
     std::unique_ptr<ruby::gpu::GpuDevice> gpu = ruby::gpu::create_dawn_device();
 
     ruby::ui::MainWindow window(gpu.get());

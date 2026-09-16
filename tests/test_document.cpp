@@ -52,9 +52,7 @@ RhythmMap fourBars(double bpm) {
     return map;
 }
 
-// The most important test in this file. Detection lives in the private module, so
-// in the public build the map is ALWAYS empty. Every query has to degrade to a sane
-// no-op rather than throwing, returning garbage, or crashing.
+// Public build's map is always empty (detection is private); queries must no-op, not crash.
 void an_empty_rhythm_map_is_an_ordinary_state() {
     const RhythmMap none;
 
@@ -89,8 +87,7 @@ void snapping_picks_the_nearest_marker() {
     checkNear(map.snap(0.0), 0.0, "an exact marker stays put");
 }
 
-// "Cut on the downbeat, shake on the beat" is the grammar of these edits, so a downbeat
-// query has to ignore the beats in between.
+// Downbeat query must ignore ordinary beats in between.
 void downbeat_snapping_ignores_ordinary_beats() {
     const RhythmMap map = fourBars(120.0);  // downbeats at 0, 2, 4, 6s
 
@@ -128,8 +125,7 @@ void re_analysis_preserves_user_markers() {
     check(!map.nearestIn(1.23, {MarkerLane::User}).has_value(), "and then it is gone");
 }
 
-// Two lanes, two different shapes of data. Vocal onsets are aperiodic, so a vocal-only
-// map must not claim a tempo that `beats` time mode would then quantise against.
+// Vocal onsets are aperiodic; a vocal-only map must not claim a tempo.
 void a_vocal_only_map_supplies_no_tempo() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
@@ -151,8 +147,7 @@ void layer_labels_follow_the_design() {
     check(defaultLabelFor(LayerKind::Footage) == LabelColor::Gray, "footage is gray");
 }
 
-// Position stored in pixels is why an AE preset breaks when the comp is reshaped.
-// Storing it as a percentage is the fix, so the default transform must declare it.
+// Pixel-stored position breaks AE presets when the comp is reshaped; must default to a resolution-independent unit.
 void the_default_transform_stores_resolution_independent_units() {
     const std::vector<Property> t = defaultTransform();
     check(t.size() == 5, "five transform properties");
@@ -264,20 +259,17 @@ void a_composition_never_shrinks_itself() {
     check(comp.growToFit(), "grew to fit the long clip");
     checkNear(comp.duration, 60.0, "sixty seconds");
 
-    // Trimming the clip right down leaves the empty tail behind on purpose. Getting rid
-    // of it is a trip to Composition Settings, not something that happens under you.
+    // Trimming leaves the tail on purpose; shrinking is a manual Composition Settings action.
     clip.outPoint = TimeValue::seconds(2.0);
     check(!comp.growToFit(), "a shorter layer does not shrink the comp");
     checkNear(comp.duration, 60.0, "the empty tail stays until the user removes it");
 
-    // Same for deleting the layer outright.
     comp.layers.clear();
     check(!comp.growToFit(), "an emptied comp does not collapse");
     checkNear(comp.duration, 60.0, "still sixty seconds");
 }
 
-// Shrinking by hand is allowed to leave layers hanging over the end. Truncating them
-// would be the destructive clamp this whole design exists to avoid.
+// Manual shrink must not truncate overhanging layers; that's the clamp this design avoids.
 void a_manual_shrink_leaves_layers_overhanging() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 60.0);
@@ -292,8 +284,7 @@ void a_manual_shrink_leaves_layers_overhanging() {
     checkNear(comp.duration, 40.0, "no footage was lost by shrinking");
 }
 
-// Layers timed in beats have to resolve before they can be compared to a duration in
-// seconds, or a beats-mode layer would read as ending at zero.
+// Beats-timed layers must resolve before comparing to a seconds duration.
 void growth_resolves_layers_timed_in_beats() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 4.0);
@@ -314,8 +305,7 @@ void removing_a_layer_orphans_its_children() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
 
-    // Read the id before adding anything else: addLayer inserts at the front, so the
-    // reference handed back by the first call does not survive the second.
+    // addLayer inserts at front, so grab the id now; the earlier reference won't survive.
     const LayerId parentId = project.addLayer(comp, "null", LayerKind::Null).id;
     project.addLayer(comp, "text", LayerKind::Text).parent = parentId;
 
@@ -332,7 +322,6 @@ void removing_a_layer_orphans_its_children() {
 }
 
 
-// Created layers: what a solid and a null are before anyone touches them.
 void created_layers_have_sane_defaults() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
@@ -355,8 +344,7 @@ void created_layers_have_sane_defaults() {
           "a null is a transform with a handle, so it needs the transform most of all");
 }
 
-// A null exists to be parented to, so deleting one has to release its children. Same
-// guarantee as any other layer, but this is the case that will actually happen.
+// Nulls exist to be parented to, so this is the case that actually happens.
 void deleting_a_null_releases_what_it_drove() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
@@ -409,9 +397,7 @@ void removing_media_clears_the_layers_that_used_it() {
     check(project.media().size() == 1, "and removes nothing");
 }
 
-// The work area bounds what the cache fills and what an export writes. One concept, not
-// two, so "no work area" and "a work area covering everything" have to behave identically
-// or every caller needs to know which it has.
+// "No work area" and "work area covering everything" must behave identically.
 void the_work_area_defaults_to_the_whole_composition() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
@@ -443,8 +429,7 @@ void a_work_area_of_no_length_is_no_work_area() {
     check(from == 0.0 && to == 12.0, "so the whole composition is live again");
 }
 
-// Clamped to the composition, because a work area that runs past the end would have the
-// cache trying to fill frames that do not exist.
+// A work area past the end would have the cache filling nonexistent frames.
 void the_work_area_is_clamped_to_the_composition() {
     Project project;
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);

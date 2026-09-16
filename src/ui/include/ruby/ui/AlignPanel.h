@@ -5,15 +5,9 @@
 
 namespace ruby::ui {
 
-// Snapping layers to the composition's edges and centres.
-//
-// This is the cheapest useful panel in the app: it reads where a layer landed, works out
-// one number, and writes it back to Position. No render work, no new document state. The
-// reason it earns a tab anyway is that the alternative is dragging with snapping on and
-// hoping, and centring a title is something an editor does forty times a night.
-//
-// Ruby stores Position as a percentage of the frame, so "align left" is a percentage that
-// still means "left" after the composition is resized. In a pixel-based app it is not.
+// Aligns/distributes layers against the composition or a selection, writing the result
+// to Position. Position is stored as a % of the frame, so "align left" stays correct
+// after the composition is resized.
 class AlignPanel : public QWidget {
     Q_OBJECT
 
@@ -22,21 +16,16 @@ public:
 
     enum class Align { Left, HCenter, Right, Top, VCenter, Bottom };
 
-    // What layers line up against. Composition is the frame's edges and centre; Selection
-    // is the bounding box of everything picked, which needs at least two of them.
+    // Composition is the frame's edges/centre; Selection is the bounding box of the pick
+    // (needs 2+ layers).
     enum class Target { Composition, Selection };
 
-    // How many alignable layers are selected.
-    //
-    // A count rather than a bool because the three states are genuinely different: none
-    // means nothing works, one means align-to-composition only, and three or more is what
-    // Distribute needs. AE greys its rows on exactly these thresholds and the reason is
-    // arithmetic, not taste: two layers have nothing between them to space out.
+    // Count, not bool: 0 disables everything, 1 allows align-to-composition, 3+ enables
+    // Distribute.
     void setSelectionCount(int count);
 
-    // Where a button sits. Public for the same reason PanelFrame::tabRect is: a row of
-    // controls laid out at its natural width and never asked what room it had is a bug
-    // this codebase has now shipped three times, and nothing outside could see it.
+    // Where a button sits. Public so callers can query actual layout, not assumed
+    // geometry.
     [[nodiscard]] QRect buttonRect(int index) const;
     [[nodiscard]] int buttonCount() const;
 
@@ -53,8 +42,8 @@ protected:
     bool event(QEvent* e) override;
 
 private:
-    // One button. `align` is meaningless on a distribute button, which is drawn and does
-    // nothing: distributing needs three layers selected and Ruby selects one at a time.
+    // One button. `align` is unused on distribute buttons; distributing needs 3+ layers
+    // selected.
     struct Button {
         QRect rect;
         int glyph = 0;       // index into the glyph painter

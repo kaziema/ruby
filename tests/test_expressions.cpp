@@ -1,6 +1,4 @@
-// End to end: an expression written on a layer's property changing what the compositor
-// would draw. Everything below goes through core::evaluate and core::layerTransform, the
-// same calls the renderer makes.
+// End-to-end: expressions changing what the compositor draws, via core::evaluate/layerTransform.
 
 #include <cmath>
 #include <cstdio>
@@ -36,8 +34,7 @@ const core::SizeOf sizes = [](const core::Layer&) {
 
 core::Property* prop(core::Layer& layer, std::string_view key) { return layer.find(key); }
 
-// With nothing installed, a project with expressions in it still reads. This is what a
-// migration tool, a headless probe, and every other test in the suite are doing.
+// With no host installed, a project with expressions must still read.
 void without_a_host_expressions_are_ignored() {
     check(core::expressionHost() == nullptr, "no host by default");
 
@@ -96,8 +93,7 @@ void value_is_the_property_s_own_value() {
     checkNear(v.c[1], 50.0, "y offset by the expression");
 }
 
-// The property with the expression on it decides the shape of the answer. An expression
-// returning the wrong shape must not quietly change what the property is.
+// A wrong-shaped expression result must not change the property's shape.
 void a_wrong_shaped_result_falls_back() {
     auto host = script::LuaHost::create();
     script::ScopedHost installed(host.get());
@@ -157,8 +153,7 @@ void a_broken_expression_falls_back_and_is_reported() {
     checkNear(spun.c[0], 45.0, "a runaway expression falls back like any other failure");
 }
 
-// The seed is what makes a render reproducible. If it stops being stable, every wiggle in
-// every existing project changes at once, silently.
+// Seed stability is what makes renders reproducible across sessions.
 void seeds_are_stable_and_well_separated() {
     const std::uint64_t a = core::expressionSeed(1, "position");
     check(a == core::expressionSeed(1, "position"), "the same layer and key give the same seed");
@@ -196,8 +191,7 @@ void two_layers_with_the_same_wiggle_move_differently() {
               first, "and each layer is repeatable");
 }
 
-// loopOut is the most pasted AE expression after wiggle: two keyframes and `loopOut()`
-// is how most looping motion in a short-form edit is made.
+// loopOut() with two keyframes is the common looping-motion pattern.
 void loop_out_repeats_the_animation() {
     auto host = script::LuaHost::create();
     script::ScopedHost installed(host.get());
@@ -251,8 +245,7 @@ void loop_out_is_safe_on_an_unfinished_animation() {
     rotation->staticValue = core::Value::scalar(30.0);
     rotation->expression = "loopOut()";
 
-    // No keyframes at all. Erroring here would mean loopOut cannot sit on a property
-    // while you are still animating it, which is exactly when people type it.
+    // loopOut must not error with zero/one keyframes (mid-animation is when it gets typed).
     checkNear(core::evaluate(*comp.find(id), *rotation, 5.0, ctx).c[0], 30.0,
               "with no keyframes it returns the value unchanged");
 
@@ -262,10 +255,7 @@ void loop_out_is_safe_on_an_unfinished_animation() {
               "and with one keyframe it still cannot loop, so it does not");
 }
 
-// Opacity was read with Property::evaluate while every other transform property went
-// through core::evaluate, so an expression on Opacity was silently ignored and the same
-// expression on Position worked. That is the worst kind of inconsistency: it looks like
-// the expression is wrong.
+// Regression: Opacity bypassed core::evaluate and silently ignored its expression.
 void every_transform_property_is_expressible() {
     auto host = script::LuaHost::create();
     script::ScopedHost installed(host.get());
@@ -283,8 +273,7 @@ void every_transform_property_is_expressible() {
         }
         const core::Value plain = core::evaluate(*comp.find(id), *target, 0.0, ctx);
 
-        // A scalar broadcast keeps the property's own shape, so this works on vectors
-        // and scalars alike without the test needing to know which is which.
+        // Scalar broadcast keeps the property's shape, works for vectors and scalars alike.
         target->expression = "7";
         const core::Value driven = core::evaluate(*comp.find(id), *target, 0.0, ctx);
         check(driven.count == plain.count, "the shape is preserved");
@@ -294,8 +283,7 @@ void every_transform_property_is_expressible() {
     }
 }
 
-// A NaN from an expression must never reach the transform. It spreads through the matrix
-// and the layer silently stops drawing.
+// A NaN from an expression must never reach the transform matrix.
 void a_non_finite_expression_cannot_reach_the_transform() {
     auto host = script::LuaHost::create();
     script::ScopedHost installed(host.get());

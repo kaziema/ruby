@@ -1,9 +1,5 @@
-// The align panel's layout.
-//
-// Six buttons in a row inside a splitter with no minimum width. This codebase has now
-// shipped the same bug three times: a row of controls laid out at its natural width,
-// never asked what room it had, painted off the right edge and unclickable. The tab strip
-// had it, the toolbar had it, this had it. So it gets the same check they do.
+// Align panel layout. Recurring bug class: controls laid out at natural width without
+// checking available room paint off the edge unclickable (tab strip, toolbar, this).
 
 #include <QApplication>
 #include <cstdio>
@@ -46,8 +42,7 @@ void the_buttons_stay_inside_the_panel() {
     panel.hide();
 }
 
-// The two rows line up with each other. They are the same six columns and reading them as
-// pairs is the whole point of the panel.
+// Align and distribute rows share the same six columns.
 void the_two_rows_share_their_columns() {
     ui::AlignPanel panel;
     panel.show();
@@ -61,7 +56,6 @@ void the_two_rows_share_their_columns() {
     panel.hide();
 }
 
-// Buttons do not overlap each other, in either row.
 void the_buttons_do_not_overlap() {
     ui::AlignPanel panel;
     panel.show();

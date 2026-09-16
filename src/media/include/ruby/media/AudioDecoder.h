@@ -7,12 +7,8 @@
 
 namespace ruby::media {
 
-// Decoded audio, interleaved float, one buffer for the whole track.
-//
-// Whole-file rather than streaming on purpose. A four minute stereo track at 48kHz is
-// about 90MB of float, which is nothing next to the video cache, and it makes analysis,
-// scrubbing and waveform drawing trivial: every one of them wants random access to the
-// samples. Streaming buys us nothing here and costs complexity everywhere.
+// Decoded audio, interleaved float, whole track buffered rather than streamed —
+// cheap (~90MB for 4min stereo/48kHz) and every consumer needs random access anyway.
 struct AudioBuffer {
     int sampleRate = 0;
     int channels = 0;
@@ -28,13 +24,12 @@ struct AudioBuffer {
         return sampleRate > 0 && channels > 0 && !samples.empty();
     }
 
-    // Mono sum, for analysis and for drawing. Rhythm detection does not care about
-    // stereo and neither does a waveform.
+    // Mono sum, for analysis and drawing; neither cares about stereo.
     [[nodiscard]] float monoAt(std::size_t frame) const noexcept;
 };
 
-// Min/max per time bucket. Drawing a waveform from raw samples means touching millions
-// of values per repaint; this is computed once and is what the timeline actually draws.
+// Min/max per time bucket, computed once so the timeline isn't rescanning raw samples
+// on every repaint.
 struct WaveformPeaks {
     double bucketsPerSecond = 0.0;
     std::vector<float> low;

@@ -1,7 +1,5 @@
-// The effect registry and its schema compliance.
-//
-// Every built-in effect runs through validate(). An effect that breaks the identity rules would
-// silently break every preset ever authored against it, so it fails the build instead.
+// Every built-in effect runs through validate() — breaking identity rules would silently
+// break every preset authored against it, so it fails the build instead.
 
 #include <cstdio>
 #include <cstdlib>
@@ -42,8 +40,7 @@ int main() {
                   static_cast<std::size_t>(engine::EffectDef::kMaxParams),
               "the effect fits in the uniform block");
 
-        // Parameters are packed positionally, so a gap or duplicate order would put a
-        // value in the wrong shader slot.
+        // Params are packed positionally; a gap/duplicate order misplaces a shader slot.
         for (std::size_t i = 0; i < def.schema.params.size(); ++i) {
             check(def.schema.params[i].order == static_cast<int>(i),
                   "parameter order matches its packing slot");
@@ -61,8 +58,7 @@ int main() {
     check(instance.params.size() == 3, "the instance has every parameter");
     check(instance.find("exposure") != nullptr, "parameters are findable by key");
 
-    // Defaults have to be identity, or dropping an effect on a layer changes the picture
-    // before the user has touched anything.
+    // Defaults must be identity, or dropping an effect changes the picture untouched.
     const core::Property* exposure = instance.find("exposure");
     const core::Property* contrast = instance.find("contrast");
     const core::Property* saturation = instance.find("saturation");

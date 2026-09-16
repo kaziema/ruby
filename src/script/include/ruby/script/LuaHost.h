@@ -9,12 +9,8 @@
 
 namespace ruby::script {
 
-// Plugs the sandbox into core's expression seam.
-//
-// One of these per thread, installed by whoever owns that thread. It is not installed
-// automatically anywhere: a module that quietly starts an interpreter on first use is a
-// module you cannot reason about, and there are legitimate callers (a migration tool, a
-// test) that should never have one at all.
+// Plugs the sandbox into core's expression seam. One per thread, installed explicitly
+// (never auto-started) since some callers — a migration tool, a test — should have none.
 class LuaHost : public core::ExpressionHost {
 public:
     ~LuaHost() override;
@@ -25,9 +21,8 @@ public:
                                 const core::TimeContext& ctx, const core::Value& fallback,
                                 std::uint64_t seed, core::Value& out) override;
 
-    // Expressions that failed, most recent first, capped. The UI wants to show these
-    // next to the property rather than in a log nobody opens, and a broken expression
-    // that silently returns its keyframed value is otherwise invisible.
+    // Failed expressions, most recent first, capped — shown next to the property since
+    // a silent fallback to the keyframed value would otherwise be invisible.
     struct Failure {
         std::string source;
         std::string error;
@@ -44,9 +39,8 @@ private:
     std::vector<Failure> failures_;
 };
 
-// Installs `host` for the calling thread and removes it again on destruction. Scoped
-// rather than a bare setter because forgetting to clear it leaves core holding a pointer
-// to something that has been destroyed.
+// Installs `host` for the calling thread, removes it on destruction — a bare setter
+// risks leaving core with a dangling pointer if clearing is forgotten.
 class ScopedHost {
 public:
     explicit ScopedHost(core::ExpressionHost* host);

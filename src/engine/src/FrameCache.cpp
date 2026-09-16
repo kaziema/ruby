@@ -24,8 +24,7 @@ void FrameCache::put(NodeHash key, gpu::TextureHandle texture, std::size_t bytes
         return;
     }
     if (bytes > stats_.budget) {
-        // One frame of 8K would evict the entire cache and then not fit anyway. Refusing
-        // is better than thrashing: the caller renders it and moves on.
+        // Would evict the whole cache and still not fit; refuse rather than thrash.
         return;
     }
     if (const auto existing = index_.find(key); existing != index_.end()) {

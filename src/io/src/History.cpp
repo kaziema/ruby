@@ -9,15 +9,13 @@ namespace ruby::io {
 History::History(std::size_t limit) : limit_(limit == 0 ? 1 : limit) {}
 
 void History::record(const core::Project& before, std::string label) {
-    // Inside a gesture the opening snapshot is the one we want to return to, so every
-    // change after it is dropped rather than stacked.
+    // Inside a gesture, keep only the opening snapshot; drop everything after it.
     if (gestureDepth_ > 0) {
         return;
     }
     past_.push_back({toJson(before), std::move(label)});
 
-    // Anything redone was a different future. Keeping it would let you redo your way
-    // into a document that never existed.
+    // A new edit invalidates any redo future.
     future_.clear();
 
     if (past_.size() > limit_) {
@@ -26,11 +24,8 @@ void History::record(const core::Project& before, std::string label) {
 }
 
 void History::beginGesture(const core::Project& before, std::string label) {
-    // Nested begins are one gesture. A drag that triggers another recorded edit should
-    // not split into two undo steps.
-    //
-    // The snapshot has to be taken before the depth goes up, or record()'s own
-    // "skip while in a gesture" guard swallows the one entry we actually need.
+    // Nested begins collapse into one gesture. Snapshot before incrementing depth, or
+    // record()'s in-gesture guard would swallow this entry too.
     if (gestureDepth_ == 0) {
         record(before, std::move(label));
     }
@@ -60,8 +55,8 @@ bool History::undo(core::Project& current) {
 
     core::Project restored;
     if (!fromJson(restored, entry.json).ok) {
-        // A snapshot we wrote failing to load means the serialiser is broken. Dropping
-        // the entry is better than corrupting the live document with a partial parse.
+        // Our own snapshot failing to load means the serializer is broken; drop the
+        // entry rather than risk a partial-parse corruption.
         return false;
     }
 

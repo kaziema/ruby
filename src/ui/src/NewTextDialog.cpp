@@ -43,8 +43,8 @@ void NewTextDialog::build(bool editing) {
 
     auto* layout = new QVBoxLayout(this);
 
-    // The text box comes first and is the only thing that gets real height. Everything
-    // else is a knob you set once; this is the thing you came here to type.
+    // Text box first, and the only thing with real height — everything else is a
+    // set-once knob.
     text_ = new QPlainTextEdit(this);
     text_->setPlainText(QStringLiteral("Text"));
     text_->setMinimumHeight(80);

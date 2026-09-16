@@ -7,11 +7,8 @@
 
 namespace ruby::ui {
 
-// The right end of the status bar: machine and engine readouts.
-//
-// A list rather than a fixed set of labels, because this is where CPU load, memory,
-// cache coverage, decode backlog and render queue state all end up, and each of those
-// arriving should be one line at the call site rather than a new widget.
+// Right end of the status bar. A list, not fixed labels, so new readouts (CPU, cache,
+// decode backlog, etc.) are one line at the call site rather than a new widget.
 class StatusReadout : public QWidget {
     Q_OBJECT
 

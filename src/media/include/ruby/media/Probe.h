@@ -5,9 +5,8 @@
 
 namespace ruby::media {
 
-// What a file turns out to contain. Read on import by opening the container and looking
-// at its stream headers, without decoding anything: a four minute 4K file should not
-// take four seconds to appear in the project panel.
+// File metadata read from container/stream headers only, no decoding — stays fast
+// regardless of file size.
 struct MediaInfo {
     bool hasVideo = false;
     bool hasAudio = false;

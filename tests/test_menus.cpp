@@ -1,8 +1,5 @@
-// Regression test for the macOS menu-bar collapse.
-//
-// macOS hides any QMenu that contains no actions, so declaring nine menus without
-// populating them silently produced a three-item menu bar. This asserts every menu
-// exists and is non-empty, offscreen, on every platform.
+// macOS hides any QMenu with no actions, so an unpopulated menu silently vanishes from
+// the bar. Asserts every menu exists and is non-empty.
 
 #include <QApplication>
 #include <QMenu>

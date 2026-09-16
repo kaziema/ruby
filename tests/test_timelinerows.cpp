@@ -1,12 +1,5 @@
-// Regression test for the twirl arrow showing nothing.
-//
-// Opening a layer's disclosure arrow used to reveal only properties that already had
-// keyframes, so a fresh layer twirled open to an empty space and there was no way to
-// reach Position or Scale from the timeline at all. Kaz hit this trying to look at a
-// layer's transform.
-//
-// Row heights are the measurable thing from outside the class, so the test works in the
-// currency of contentHeight rather than reaching into the row list.
+// The twirl arrow must reveal a layer's transform properties even with no keyframes yet.
+// Row heights (contentHeight) are the only thing measurable from outside the class.
 
 #include <QApplication>
 #include <cstdio>
@@ -44,32 +37,28 @@ int main(int argc, char** argv) {
     const int closed = view.contentHeight();
     check(closed > 0, "a closed layer has some height");
 
-    // A layer with NO keyframes at all: the case that used to open to nothing.
     view.toggleExpanded(id);
     const int opened = view.contentHeight();
     check(opened > closed,
           "twirling a layer with no keyframes still reveals its transform properties");
 
-    // One group header plus five transform properties: anchor point, position, scale,
-    // rotation, opacity.
-    const int expected = closed + ui::theme::metrics::kPropertyRowH * 6;
-    check(opened == expected, "a Transform header and all five transform properties");
+    // Header + 5 transform properties + Audio Level: anchor, position, scale, rotation,
+    // opacity, audio_level (structurally present on every layer, like the speaker switch).
+    const int expected = closed + ui::theme::metrics::kPropertyRowH * 7;
+    check(opened == expected, "a Transform header and all six properties");
 
     view.toggleExpanded(id);
     check(view.contentHeight() == closed, "and closing it puts the height back");
 
-    // U is a different thing: open, but only what is animated. With nothing animated that
-    // is the header and nothing else.
+    // U opens only what's animated; with nothing animated that's just the header.
     view.revealAnimated(id);
     const int revealed = view.contentHeight();
     check(revealed < opened, "U shows less than the twirl arrow does");
     check(revealed > closed, "but still opens the layer");
 
-    // Pressing U again closes it, the way AE's does.
     view.revealAnimated(id);
     check(view.contentHeight() == closed, "U toggles closed again");
 
-    // With something animated, U shows that one property.
     {
         const core::TimeContext ctx = comp.timeContext();
         core::Property* scale = comp.find(id)->find("scale");
@@ -83,11 +72,10 @@ int main(int argc, char** argv) {
     check(view.contentHeight() == closed + ui::theme::metrics::kPropertyRowH * 2,
           "U shows the header and only the animated property");
 
-    // And the twirl arrow, on a layer U had filtered, goes back to showing everything.
+    // The twirl arrow always shows everything, even after U filtered it.
     view.toggleExpanded(id);   // closes
     view.toggleExpanded(id);   // opens, unfiltered
-    check(view.contentHeight() == expected,
-          "the arrow always means everything, even after U filtered it");
+    check(view.contentHeight() == expected, "the arrow always means everything");
 
     if (failures != 0) {
         std::fprintf(stderr, "\n%d check(s) failed\n", failures);

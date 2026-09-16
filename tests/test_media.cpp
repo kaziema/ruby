@@ -1,6 +1,4 @@
-// Decodes real frames from a real file. Needs a video to point at, so it takes a path
-// from RUBY_TEST_VIDEO and reports a skip when there isn't one. A test that silently
-// passes is worse than one that says it did nothing.
+// Decodes real frames from a real file at RUBY_TEST_VIDEO; skips loudly if unset.
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,8 +22,7 @@ void check(bool cond, const char* what) {
     }
 }
 
-// A frame that decoded but came out uniformly black usually means the colour conversion
-// silently did nothing, which is easy to miss and looks like "no video".
+// A uniformly flat frame usually means colour conversion silently no-opped.
 bool hasContent(const VideoFrame& frame) {
     std::uint8_t low = 255;
     std::uint8_t high = 0;
@@ -71,8 +68,7 @@ int main() {
         check(hasContent(*first), "the frame is not uniformly flat");
     }
 
-    // Seeking forward, then backward. Backward is the case a naive decoder gets wrong,
-    // because it cannot rewind without seeking to a keyframe first.
+    // Seek backward, which a naive decoder gets wrong without a keyframe rewind.
     const VideoFrame* later = decoder->frameAt(3.0);
     check(later != nullptr && later->valid(), "a later frame decodes");
     const double laterPts = (later != nullptr) ? later->pts : -1.0;
@@ -99,12 +95,9 @@ int main() {
         check(audio->sampleRate == 48000, "audio is resampled to the target rate");
         check(audio->channels >= 1 && audio->channels <= 2, "channels are capped at stereo");
 
-        // Decoded duration should track the video's, since they come from one file.
         check(std::fabs(audio->duration() - decoder->duration()) < 0.5,
               "audio and video durations agree");
 
-        // Silence would mean the resampler ran but produced nothing, which looks like
-        // success everywhere except your ears.
         float loudest = 0.0f;
         for (float v : audio->samples) {
             loudest = std::max(loudest, std::fabs(v));

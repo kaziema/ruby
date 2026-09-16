@@ -7,14 +7,12 @@
 
 // --- GPU abstraction ---------------------------------------------------------
 //
-// Backend is Dawn (native WebGPU), but nothing above this header knows that.
-// A 2D compositor's GPU surface area is small: textures, render passes, compute
-// dispatch, blits, buffer uploads. Roughly the operations below. Keeping the
-// backend behind this interface means swapping it costs an afternoon rather than
-// a rewrite, which matters because Dawn tracks an evolving standard.
+// Backend is Dawn (native WebGPU), but nothing above this header knows that — a 2D
+// compositor's GPU surface is small (textures, passes, compute, blits, uploads), so
+// swapping backends should cost an afternoon, not a rewrite.
 //
-// STATUS: Dawn backend implemented for device, textures, buffers and command
-// submission. Compute pipelines wait on the Slang shader toolchain.
+// STATUS: device/textures/buffers/submission implemented. Compute pipelines wait on
+// the Slang shader toolchain.
 
 namespace ruby::gpu {
 
@@ -24,9 +22,8 @@ enum class TextureFormat {
     RGBA32Float,
     R8Unorm,       // masks
     R16Float,
-    // Display formats. The sRGB variants make the hardware apply the linear-to-display
-    // transform on write, which is why we composite in linear and present to one of
-    // these rather than encoding by hand in every shader.
+    // Display formats — sRGB variants let hardware apply the linear-to-display
+    // transform on write, instead of every shader encoding it by hand.
     BGRA8Unorm,
     BGRA8UnormSrgb,
     RGBA8UnormSrgb,
@@ -80,18 +77,15 @@ public:
     virtual ~ComputePipeline() = default;
 };
 
-// A draw pipeline. The engine's own passes (composite, blit) are a handful of these;
-// the effect library is compute.
-// How a draw combines with what is already in the target.
+// A draw pipeline. Engine passes (composite, blit) are a handful of these; effects
+// are compute.
+// How a draw combines with what's already in the target. Closed enum: these are the
+// blend modes expressible as fixed-function GPU state. Overlay/Soft Light/Hard Light/
+// Difference need the shader to read the destination — a different mechanism, not
+// built here.
 //
-// These are the blend modes expressible as fixed-function GPU state, which is why they
-// are a closed enum here rather than something richer. Overlay, Soft Light, Hard Light
-// and Difference cannot be written as a blend equation at all: they need the shader to
-// read the destination, which is a different mechanism and a separate piece of work.
-//
-// Everything assumes PREMULTIPLIED source colour. That is what makes the factors below
-// compose correctly; with straight alpha, Screen and Add both blow out wherever a layer
-// is partly transparent.
+// Assumes PREMULTIPLIED source color, required for these factors to compose correctly;
+// straight alpha would blow out Screen/Add on partly transparent layers.
 enum class BlendPreset {
     AlphaOver,  // Normal
     Add,
@@ -122,8 +116,8 @@ public:
     // What the swapchain actually gave us. Pipelines have to be built against it.
     [[nodiscard]] virtual TextureFormat format() const noexcept = 0;
 
-    // The next backbuffer, or null if it could not be acquired (resizing, occluded,
-    // device lost). Callers must handle null rather than assume a frame is always ready.
+    // Next backbuffer, or null if unavailable (resizing, occluded, device lost) —
+    // callers must handle null.
     [[nodiscard]] virtual TextureHandle acquire() = 0;
 
     virtual void present() = 0;
@@ -150,9 +144,8 @@ public:
     [[nodiscard]] virtual ComputePipelineHandle create_compute_pipeline(
         std::string_view slang_module, std::string_view entry_point) = 0;
 
-    // Engine-internal draw passes, written in WGSL directly. These are a fixed handful
-    // that we write once; Slang's module system earns its keep on the effect library,
-    // not here.
+    // Engine-internal draw passes, written in WGSL directly — a fixed handful we
+    // write once. Slang's module system pays off on the effect library, not here.
     [[nodiscard]] virtual RenderPipelineHandle create_render_pipeline(
         std::string_view wgsl, std::string_view vertex_entry,
         std::string_view fragment_entry, TextureFormat target_format,
@@ -191,21 +184,19 @@ public:
 
     virtual void copy_texture(const TextureHandle& src, const TextureHandle& dst) = 0;
 
-    // Opens a render pass, clearing the target. Colour components are 0..1 in linear
-    // light, which is the working space everything composites in.
+    // Opens a render pass, clearing the target. Color components are 0..1 in linear
+    // light (the working space everything composites in).
     virtual void begin_pass(const TextureHandle& target, float r, float g, float b,
                             float a) = 0;
     virtual void end_pass() = 0;
 
-    // Restricts drawing to a rectangle of the target, in pixels. Everything outside is
-    // left untouched, including by the clear, which applies to the whole attachment.
+    // Restricts drawing to a pixel rect; the clear still applies to the whole attachment.
     virtual void set_scissor(std::uint32_t x, std::uint32_t y, std::uint32_t width,
                              std::uint32_t height) = 0;
 
-    // Draws `vertex_count` vertices with the given pipeline and uniform block. Vertices
-    // are generated in the shader, so there is no vertex buffer to bind.
-    // `texture` is sampled by the pipeline. Callers that want a flat colour bind a 1x1
-    // white texture rather than there being two pipelines to keep in step.
+    // Draws `vertex_count` vertices; generated in the shader, so no vertex buffer to
+    // bind. `texture` is sampled by the pipeline — flat color is a 1x1 white texture,
+    // not a second pipeline.
     virtual void draw(const RenderPipelineHandle& pipeline, const BufferHandle& uniforms,
                       const TextureHandle& texture, std::uint32_t vertex_count) = 0;
 };

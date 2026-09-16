@@ -55,8 +55,7 @@ void drawPen(QPainter& p) {
 }
 
 
-// A magnifier. The plus inside is what separates it from a search field at 16px, and
-// zoom is the only tool in the bar whose icon is also a very common non-tool.
+// Magnifier with a plus, to distinguish from a search-field icon at 16px.
 void drawZoom(QPainter& p) {
     p.drawEllipse(QPointF(7.0, 7.0), 3.9, 3.9);
     p.drawLine(QPointF(9.9, 9.9), QPointF(13.2, 13.2));
@@ -64,8 +63,7 @@ void drawZoom(QPainter& p) {
     p.drawLine(QPointF(7.0, 5.2), QPointF(7.0, 8.8));
 }
 
-// An arc with an arrowhead: rotation as a motion rather than as a circle, because a plain
-// circle reads as a radio button or a record light.
+// Arc + arrowhead rather than a plain circle, which reads as a radio button.
 void drawRotation(QPainter& p) {
     QPainterPath arc;
     arc.arcMoveTo(QRectF(3.4, 3.4, 9.2, 9.2), 60.0);
@@ -104,11 +102,8 @@ void drawAnchor(QPainter& p) {
     p.drawLine(QPointF(11.8, 8.0), QPointF(14.2, 8.0));
 }
 
-// A media bin: a folder with two strips of content in it. Reads as "the place your stuff
-// lives" at 16px, which a plain folder does not: a folder alone says "files", and this
-// panel holds compositions and clips rather than a directory.
-// A house. Deliberately the most literal icon in the bar: it is the way back out to the
-// project selector, and the one control that should need no learning.
+// The house is the most literal icon here on purpose: it's the way back to the
+// project selector and needs no learning.
 void drawHome(QPainter& p) {
     QPainterPath roof;
     roof.moveTo(2.6, 7.8);
@@ -138,6 +133,8 @@ void drawProject(QPainter& p) {
     folder.closeSubpath();
     p.drawPath(folder);
 
+    // A folder with two strips of content, since a plain folder just reads as "files"
+    // and this panel holds compositions and clips, not a directory.
     // Two rows inside, the way the panel itself lists items.
     p.drawLine(QPointF(4.4, 8.2), QPointF(11.6, 8.2));
     p.drawLine(QPointF(4.4, 10.4), QPointF(9.2, 10.4));

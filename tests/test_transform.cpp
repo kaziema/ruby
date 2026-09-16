@@ -1,8 +1,5 @@
-// Tests for layer transforms and the parent chain.
-//
-// The cycle cases are the point of this file. A parent loop walked without a cap is an
-// infinite loop inside the render path, which presents as a frozen window with nothing in
-// the log. Far better as a failing assert here.
+// Layer transform and parent chain tests. Cycle cases matter most: an unguarded parent
+// loop is an infinite loop in the render path, which just freezes the window.
 
 #include <cmath>
 #include <cstdio>
@@ -36,9 +33,7 @@ void set(Layer& layer, std::string_view key, double x, double y) {
         p->staticValue = Value::vec2(x, y);
     }
 }
-// Consumes the result and asserts it is a real transform. The point of these calls is
-// that they RETURN at all, but a nodiscard value should still be looked at, and "did it
-// come back as NaN" is worth knowing either way.
+// Asserts the transform is finite; the point is mainly that it returns at all.
 void checkFinite(const Transform2D& t, const char* what) {
     const bool ok = std::isfinite(t.a) && std::isfinite(t.b) && std::isfinite(t.c) &&
                     std::isfinite(t.d) && std::isfinite(t.tx) && std::isfinite(t.ty);
@@ -54,13 +49,11 @@ void set1(Layer& layer, std::string_view key, double v) {
     }
 }
 
-// Every layer is 100x100 unless a test says otherwise. Enough to exercise the anchor
-// without making the arithmetic in these tests hard to check by hand.
+// Default layer size, unless a test overrides it.
 const SizeOf sizes = [](const Layer&) { return LayerSize{100.0, 100.0}; };
 
 void composition_multiplies_in_the_right_order() {
-    // Scale then translate is not translate then scale, and getting it backwards is the
-    // classic way a layer ends up ten times further from the origin than intended.
+    // Scale-then-translate != translate-then-scale; order matters.
     const Transform2D scaled = Transform2D::scale(2.0, 2.0);
     const Transform2D moved = Transform2D::translate(10.0, 0.0);
 
@@ -73,8 +66,7 @@ void composition_multiplies_in_the_right_order() {
 
 void rotation_turns_the_right_way() {
     const Transform2D r = Transform2D::rotate(90.0);
-    // Y is down in composition space, so a positive rotation takes +X toward +Y, which
-    // reads as clockwise on screen. This is the convention AE uses.
+    // Y is down, so positive rotation is clockwise on screen (AE's convention).
     checkNear(r.applyX(1.0, 0.0), 0.0, "90 degrees sends (1,0) off the x axis", 1e-12);
     checkNear(r.applyY(1.0, 0.0), 1.0, "and onto +y, which is downward on screen", 1e-12);
 
@@ -83,8 +75,7 @@ void rotation_turns_the_right_way() {
     checkNear(full.applyY(3.0, 4.0), 4.0, "and in y", 1e-9);
 }
 
-// The anchor point is what rotation and scale pivot around. Untouched, a layer turns about
-// its own centre; moved, it swings.
+// Anchor point is the pivot for rotation/scale.
 void the_anchor_point_is_the_pivot() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
@@ -144,9 +135,7 @@ void a_parent_moves_its_child() {
               "a parent at the origin leaves the child alone in x", 1e-9);
 }
 
-// The reason this file exists. Every one of these used to be an infinite loop waiting to
-// happen, and none of them are reachable through the UI today, which is exactly why they
-// need a test rather than a code review.
+// Cycle cases unreachable through the UI but each an infinite loop waiting to happen.
 void parent_cycles_terminate() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
@@ -178,7 +167,7 @@ void parent_cycles_terminate() {
     checkFinite(resolvedTransform(comp, *comp.find(b), 0.0, ctx, 1000, 1000, sizes),
                 "a three layer loop terminates");
 
-    // A parent id pointing at nothing, which is what a hand-edited file can produce.
+    // A dangling parent id, as a hand-edited file could produce.
     comp.find(a)->parent = 9999;
     comp.find(b)->parent.reset();
     comp.find(c)->parent.reset();
@@ -187,8 +176,7 @@ void parent_cycles_terminate() {
                 "a dangling parent renders unparented rather than failing");
 }
 
-// The UI needs to refuse a bad parenting before it is stored, which is the only moment it
-// can be explained to whoever is doing it.
+// Bad parenting must be refused before it's stored, not caught later.
 void bad_parenting_is_refused_up_front() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
@@ -212,7 +200,7 @@ void a_long_chain_is_bounded() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
 
-    // Deeper than the cap, with no cycle at all. It must terminate on depth alone.
+    // No cycle, just deeper than the cap; must terminate on depth alone.
     LayerId previous = 0;
     LayerId first = 0;
     for (int i = 0; i < kMaxParentDepth + 20; ++i) {
@@ -229,8 +217,7 @@ void a_long_chain_is_bounded() {
                 "a chain longer than the cap resolves without spinning");
 }
 
-// canParentTo is what the Parent menu greys out with. If it says yes to something that
-// closes a loop, the loop gets created and only the render path's cycle guard saves us.
+// canParentTo drives the Parent menu's greyed-out state; a false negative here creates a loop.
 void the_parent_menu_refuses_exactly_the_loops() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
@@ -249,18 +236,16 @@ void the_parent_menu_refuses_exactly_the_loops() {
     check(!canParentTo(comp, a, c), "grandchild");
     check(canParentTo(comp, a, d), "an unrelated layer is fine");
 
-    // The other direction is always fine: a deeper layer may parent to a shallower one.
+    // Parenting down the chain (deeper to shallower) is always fine.
     check(canParentTo(comp, d, c), "parenting down the existing chain is fine");
 
-    // And having accepted it, the result must genuinely have no cycle.
     comp.find(d)->parent = c;
     check(!hasParentCycle(comp, d), "an accepted parenting does not create a cycle");
     check(!hasParentCycle(comp, a), "nor anywhere else in the chain");
 }
 
-// A non-finite property value would poison the whole matrix, and a NaN matrix reaching
-// the GPU makes a layer vanish with nothing to diagnose. It can come from a corrupt file
-// today and from an expression the moment scripting lands.
+// A NaN property must not produce a NaN matrix; that reaches the GPU as an undiagnosable
+// vanished layer.
 void non_finite_values_do_not_poison_the_matrix() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);
@@ -291,8 +276,7 @@ void non_finite_values_do_not_poison_the_matrix() {
           "and a NaN scale");
 }
 
-// Degenerate but legitimate. These must survive rather than be guarded away: a zero scale
-// is how you hide something by animating it, and a negative one is how you flip it.
+// Zero/negative scale are legitimate (hide, flip) and must not be guarded away.
 void degenerate_but_legal_scales_are_left_alone() {
     Project project;
     Composition& comp = project.addComposition("c", 1000, 1000, 30.0, 10.0);

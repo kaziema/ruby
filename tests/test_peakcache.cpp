@@ -1,7 +1,4 @@
-// Tests for the waveform peak pyramid and its on-disk cache.
-//
-// No media files: the pyramid is built from a synthesised AudioBuffer, so these run
-// anywhere and do not depend on FFmpeg being able to open anything.
+// Waveform peak pyramid and its on-disk cache. Uses a synthesised AudioBuffer, no FFmpeg.
 
 #include <cmath>
 #include <cstdio>
@@ -78,7 +75,6 @@ void each_level_is_a_quarter_of_the_one_below() {
           "climbing stops once a level is too small to show structure");
 }
 
-// The reason coarse levels can be built from fine ones instead of from the samples.
 void summarising_a_summary_is_exact_for_min_max() {
     const PeakPyramid pyramid = PeakPyramid::build(tone(8.0));
     const auto& levels = pyramid.levels();
@@ -87,8 +83,7 @@ void summarising_a_summary_is_exact_for_min_max() {
     const PeakLevel& fine = levels[0];
     const PeakLevel& coarse = levels[1];
 
-    // Every coarse bucket must be exactly the extremes of the fine buckets under it. If
-    // this drifts, the waveform changes shape as you zoom, which reads as a bug.
+    // Coarse buckets must be exact extremes of the fine ones, or the waveform shape drifts on zoom.
     for (std::size_t b = 0; b < coarse.count(); ++b) {
         const std::size_t begin = b * 4;
         const std::size_t end = std::min(begin + 4, fine.count());
@@ -111,14 +106,12 @@ void summarising_a_summary_is_exact_for_min_max() {
 void the_level_chosen_matches_the_zoom() {
     const PeakPyramid pyramid = PeakPyramid::build(tone(60.0));
 
-    // Zoomed right in: a pixel covers a millisecond, so nothing is coarse enough and we
-    // should get the finest level rather than nothing at all.
+    // Over-zoomed request must still return a level, the finest one.
     const PeakLevel* fine = pyramid.levelFor(0.001);
     check(fine != nullptr, "an over-zoomed request still returns a level");
     checkNear(fine->bucketsPerSecond, kBasePeaksPerSecond, "and it is the finest one");
 
-    // Zoomed out: a pixel covers a second, so one bucket per second is plenty and asking
-    // for 150 would be reading 150x the data to draw the same pixel.
+    // Zoomed out: coarser level avoids reading far more data than the pixel needs.
     const PeakLevel* coarse = pyramid.levelFor(1.0);
     check(coarse != nullptr, "a zoomed out request returns a level");
     check(coarse->bucketsPerSecond < kBasePeaksPerSecond,
@@ -161,7 +154,7 @@ void a_pyramid_survives_a_round_trip() {
     std::filesystem::remove(file);
 }
 
-// A bad cache is a cache miss. The samples are still on disk, so it can always be rebuilt.
+// A bad cache is a miss, not an error; it can always be rebuilt from the source samples.
 void a_bad_cache_is_a_miss_not_an_error() {
     PeakPyramid pyramid;
     check(!pyramid.load(tempFile("ruby_peaks_does_not_exist.rbypeak")),
@@ -189,7 +182,7 @@ void a_bad_cache_is_a_miss_not_an_error() {
     std::filesystem::remove(cut);
 }
 
-// Path alone is not identity: a re-exported clip keeps its name.
+// Cache key must not rely on path alone; a re-exported clip keeps its name.
 void the_cache_key_notices_a_changed_file() {
     const std::string media = tempFile("ruby_peaks_media.bin");
     {

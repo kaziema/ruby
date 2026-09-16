@@ -21,8 +21,7 @@ struct Preset {
     int height;
 };
 
-// Vertical first, because that is what this app is for. A short-form editor that opens
-// on 1920x1080 is asking every single user to change it every single time.
+// Vertical first: this is a short-form editor, so that's the common case.
 constexpr Preset kPresets[] = {
     {"Vertical  ·  1080 x 1920  ·  TikTok, Reels, Shorts", 1080, 1920},
     {"Square  ·  1080 x 1080", 1080, 1080},
@@ -79,8 +78,7 @@ void NewCompositionDialog::build(bool editing, double contentEnd) {
     form->addRow(QStringLiteral("Height"), height_);
 
     fps_ = new QComboBox(this);
-    // 23.976 and 29.97 are here because real footage arrives at them, and a comp that
-    // cannot match its source frame rate makes every cut land between frames.
+    // 23.976/29.97 included since real footage arrives at them.
     for (const char* rate : {"23.976", "24", "25", "29.97", "30", "50", "60"}) {
         fps_->addItem(QString::fromUtf8(rate));
     }
@@ -88,9 +86,8 @@ void NewCompositionDialog::build(bool editing, double contentEnd) {
     form->addRow(QStringLiteral("Frame rate"), fps_);
 
     duration_ = new QDoubleSpinBox(this);
-    // The cap is deliberately absurd. Duration now grows to whatever gets dropped in,
-    // and this dialog is the only way to bring it back down, so a limit lower than the
-    // longest clip somebody might drop would strand them with no way to shrink.
+    // Cap is deliberately huge: duration grows to fit dropped clips, and this dialog
+    // is the only way to shrink it back down.
     duration_->setRange(0.5, 86400.0);
     duration_->setDecimals(2);
     duration_->setSuffix(QStringLiteral(" s"));
@@ -99,9 +96,7 @@ void NewCompositionDialog::build(bool editing, double contentEnd) {
 
     layout->addLayout(form);
 
-    // Shrinking is a guessing game without this. The number you almost always want is
-    // "where my last layer stops", and that is not readable off a timeline that has just
-    // rescaled to an hour.
+    // Shows where the last layer ends, since that's the number needed to shrink safely.
     if (editing && contentEnd > 0.0) {
         auto* hint = new QLabel(
             QStringLiteral("Layers run to %1 s. A shorter duration keeps them, it just "
@@ -124,8 +119,7 @@ void NewCompositionDialog::build(bool editing, double contentEnd) {
     connect(preset_, &QComboBox::currentIndexChanged, this,
             &NewCompositionDialog::applyPreset);
 
-    // Typing a size that stops matching the preset should say so rather than leaving a
-    // label that quietly lies about what you are making.
+    // Switches to Custom when width/height stop matching any preset.
     const auto markCustom = [this] {
         for (int i = 0; i < static_cast<int>(std::size(kPresets)); ++i) {
             if (kPresets[i].width == width_->value() &&

@@ -9,8 +9,7 @@ using core::ParamType;
 using core::SpatialUnit;
 using json = nlohmann::ordered_json;
 
-// Ordered, and written with an indent, because these files exist to be read in a diff.
-// A reordering parser would make every unrelated change look like a schema change.
+// Ordered + indented: these files are meant to be diffed.
 
 const char* name(SpatialUnit u) {
     switch (u) {
@@ -21,6 +20,7 @@ const char* name(SpatialUnit u) {
         case SpatialUnit::Degrees:           return "degrees";
         case SpatialUnit::Percent:           return "percent";
         case SpatialUnit::Normalized:        return "normalized";
+        case SpatialUnit::Decibels:          return "decibels";
     }
     return "normalized";
 }
@@ -33,6 +33,7 @@ bool unitFrom(const std::string& s, SpatialUnit& out) {
     if (s == "degrees")             { out = SpatialUnit::Degrees; return true; }
     if (s == "percent")             { out = SpatialUnit::Percent; return true; }
     if (s == "normalized")          { out = SpatialUnit::Normalized; return true; }
+    if (s == "decibels")            { out = SpatialUnit::Decibels; return true; }
     return false;
 }
 
@@ -63,9 +64,8 @@ bool typeFrom(const std::string& s, ParamType& out) {
 }
 
 json writeRange(const core::ParamRange& r) {
-    // An absent limit is written as null rather than omitted. "Unbounded" is a decision
-    // somebody made and it should be visible in the file, not inferred from a missing
-    // key that could equally mean the writer forgot.
+    // Absent limit written as null, not omitted: "unbounded" should be visible in the
+    // file, not indistinguishable from a forgotten field.
     json out;
     out["minimum"] = r.minimum.has_value() ? json(*r.minimum) : json(nullptr);
     out["maximum"] = r.maximum.has_value() ? json(*r.maximum) : json(nullptr);
@@ -136,9 +136,8 @@ bool schemaFromJson(const std::string& text, core::EffectSchema& out, std::strin
         if (!typeFrom(p.value("type", std::string{"float"}), spec.type)) {
             return fail("unknown param type");
         }
-        // A unit we do not recognise is refused rather than defaulted. Silently reading an
-        // unknown unit as `normalized` would reinterpret every stored value of that
-        // parameter, which is the exact failure D1's unit rule exists to prevent.
+        // Unrecognized unit is refused, not defaulted: silently reading it as `normalized`
+        // would reinterpret every stored value of that parameter.
         if (!unitFrom(p.value("unit", std::string{"normalized"}), spec.unit)) {
             return fail("unknown unit");
         }

@@ -5,10 +5,8 @@
 #include <QPalette>
 #include <QString>
 
-// Design tokens. Values are literal and intentional: colours, row heights and panel
-// widths are fixed, not suggestions. Everything is square except traffic lights, tab dots,
-// stopwatches, and A/V dots. Depth comes from 1px borders and value steps, not
-// shadows.
+// Design tokens: fixed, not suggestions. Everything is square except traffic lights,
+// tab dots, stopwatches and A/V dots; depth comes from borders/value steps, not shadows.
 
 namespace ruby::ui::theme {
 
@@ -47,8 +45,7 @@ inline const QColor kPrimaryText{"#ffffff"};
 inline const QColor kToggleActiveBg{"#4a4a4a"};
 inline const QColor kToggleActiveText{"#f0f0f0"};
 
-// Track is darker than the panel so it reads as a
-// groove rather than a border, and the handle is light enough to look like a control.
+// Track is darker than the panel to read as a groove, not a border.
 inline const QColor kScrollTrack{"#161616"};
 inline const QColor kScrollHandle{"#4a4a4a"};
 inline const QColor kScrollHandleHover{"#5f5f5f"};
@@ -77,13 +74,11 @@ inline const QColor kKeyframeBorder{"#111111"};
 inline const QColor kKeyConnector{"#4a4a4a"};
 inline const QColor kExpressionText{"#9fd18f"};
 inline const QColor kCacheReady{"#7cb342"};
-// Green for RAM, blue for disk, under the ruler. AE's colours on purpose: every person
-// this app is for has already learned them, and the entire value of a visible cache is
-// that it is read at a glance rather than studied.
+// AE's cache colors (green=RAM, blue=disk) on purpose: users already know them, and a
+// cache indicator only works if it reads at a glance.
 inline const QColor kCacheRam{"#4c8b2b"};
 inline const QColor kCacheDisk{"#2f6690"};
-// The work area's ends. Bright enough to grab, dim enough not to compete with the
-// playhead, which is the one thing on the ruler that must always win.
+// Work area ends: grabbable, but dim enough that the playhead still wins visually.
 inline const QColor kWorkAreaEdge{"#8a8a8a"};
 inline const QColor kWorkAreaOutside{"#000000"};
 inline const QColor kGraphBg{"#1b1b1b"};
@@ -120,12 +115,8 @@ inline constexpr int kColumnLabelH = 20;
 inline constexpr int kWorkAreaH = 6;
 inline constexpr int kCacheBarH = 4;
 
-// The whole header, which is what every row offset below it is measured from.
-//
-// Summed rather than written down, and the bars added INSIDE it rather than below it, so
-// that every existing "content starts here" calculation stayed correct without being
-// touched. Two new strips across the top of a panel is exactly the change that produces
-// the overlap bugs this file keeps collecting comments about.
+// Full header height; every row offset below is measured from this. Summed so it stays
+// correct as strips are added inside it.
 inline constexpr int kColumnHeaderH = kColumnLabelH + kWorkAreaH + kCacheBarH;
 
 inline constexpr int kProjectRowH = 22;
@@ -140,12 +131,8 @@ inline constexpr int kKeyframeRowH = 22;
 inline constexpr int kProjectPanelW = 250;
 inline constexpr int kInspectorPanelW = 268;
 inline constexpr int kBrowserPanelW = 494;
-// The keyframe navigator has a column of its own, between Parent and the track.
-//
-// It used to be drawn at trackLeft() - kNavW, which is exactly where Parent already was:
-// on a property row nothing else lived there so it looked fine, and on a layer row it
-// printed straight over the word "None". Two things sharing a column is not a layout, it
-// is two layouts that happen not to have collided yet.
+// Keyframe navigator gets its own column between Parent and the track; sharing a column
+// with Parent caused it to overwrite "None" on layer rows.
 inline constexpr int kKeyNavW = 52;
 
 // Layer column sub-widths, left to right, matching the order AE lays them out in:
@@ -161,9 +148,7 @@ inline constexpr int kPreserveW = 16;  // the "T" box
 inline constexpr int kTrkMatW = 74;
 inline constexpr int kParentW = 52;
 
-// Summed rather than written down. The number used to be a literal, and every column
-// added since has meant editing a total by hand and hoping it still matched what the
-// painter did. It does not have to match: it can be derived.
+// Summed rather than hardcoded, so adding a column can't drift from the total.
 inline constexpr int kLayerColumnW = kAvToggleW + kIndexW + kLayerNameW + kSwitchesW +
                                      kModeW + kPreserveW + kTrkMatW + kParentW + kKeyNavW;
 
@@ -178,21 +163,12 @@ inline constexpr int kMaxTransitionMs = 80;
 }  // namespace metrics
 
 // --- Type -------------------------------------------------------------------
-// Archivo (UI) and Space Mono (code). Neither is bundled yet, so these fall back to
-// the platform's nearest compact grotesque and monospace faces.
+// Archivo (UI) / Space Mono (code); neither is bundled, so both fall back to platform faces.
 QString uiFontFamily();
 QString monoFontFamily();
 
-// Numbers, timecodes, counts and tick labels.
-//
-// Numerals use the interface face rather than a monospace one, so they match the rest
-// of the UI instead of looking like a terminal. Kept as its own function rather than
-// calling uiFontFamily() at each site, so this is one decision in one place, and so
-// genuine code (expressions) can keep a real monospace font.
-//
-// Tabular figures are requested, which matters more than it sounds: with proportional
-// digits a value jitters left and right while you scrub it, because a 1 is narrower than
-// a 0. Tabular locks every digit to the same advance.
+// Numbers/timecodes use the UI face (not mono) with tabular figures, so digits don't
+// jitter width while scrubbing.
 [[nodiscard]] QFont numericFont(int pixelSize);
 
 namespace type {
@@ -207,13 +183,11 @@ inline constexpr int kColumnHeader = 10;
 inline constexpr int kMeta = 10;          // 9.5 rounded, mono
 }  // namespace type
 
-// Application palette built from the tokens above. Preferred over a blanket
-// `QWidget { background: ... }` stylesheet rule, which propagates into every
-// subclass and stops custom-painted widgets from drawing their own chrome.
+// Palette built from the tokens above, preferred over a blanket QWidget stylesheet
+// rule, which would override custom-painted widgets.
 QPalette palette();
 
-// Stylesheet for the widget classes the palette cannot express. Deliberately
-// scoped to named classes only.
+// Stylesheet for widget classes the palette can't express; scoped to named classes only.
 QString styleSheet();
 
 }  // namespace ruby::ui::theme

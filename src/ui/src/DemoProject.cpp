@@ -15,11 +15,8 @@ using namespace core;
 
 namespace {
 
-// Writes keys at the given times, walking the value from `from` to `to`.
-//
-// Keyframe values must keep the shape of the property they belong to. Writing a scalar
-// onto a vec2 property makes it evaluate to one number the moment it is animated, which
-// showed up in the inspector as Position rendering "30.0" instead of a pair.
+// Writes keys from `from` to `to`. Values must match the property's shape (e.g. vec2),
+// or it collapses to a scalar once animated.
 void animate(Property& p, const TimeContext& ctx, std::initializer_list<double> times,
              const Value& from, const Value& to) {
     p.staticValue = from;
@@ -55,13 +52,10 @@ Property makeProp(std::string key, std::string label, std::string group, Spatial
 
 namespace {
 
-// TEMPORARY. Real media arrives through import once the Project panel exists. Until
-// then the paths come from the command line, so nothing machine-specific lands in the
-// repo. No paths means the footage layers stay flat, which is a fine fallback.
+// TEMPORARY: paths come from the command line until the Project panel can import media.
 std::vector<std::string> g_mediaPaths;
 
-// Imports a path into the pool and returns its id, so demo layers reference the pool
-// like any imported layer would.
+// Imports a path into the media pool and returns its id.
 std::optional<MediaId> importAt(Project& project, std::size_t index) {
     if (index >= g_mediaPaths.size() || g_mediaPaths[index].empty()) {
         return std::nullopt;
@@ -111,8 +105,7 @@ Project sampleProject() {
     sneaker.media = importAt(project, 0);
     sneaker.expanded = true;
     {
-        // A graded footage layer, with the grade animated so the effect is obviously
-        // doing something over time rather than being a static look.
+        // Animated grade, so the effect is visibly doing something rather than static.
         EffectInstance grade = engine::EffectRegistry::instance().instantiate(
             "core.color.grade");
         if (Property* saturation = grade.find("saturation"); saturation != nullptr) {
@@ -129,8 +122,7 @@ Project sampleProject() {
     captions.inPoint = TimeValue::seconds(1.2);
     captions.outPoint = TimeValue::seconds(10.6);
     captions.expanded = true;
-    // A precomp fills the frame, and this one has no content to render, so drop it back
-    // to let the footage underneath show through.
+    // Empty precomp fills the frame; drop opacity so footage underneath shows through.
     if (Property* op = captions.find("opacity"); op != nullptr) {
         op->staticValue = Value::scalar(35.0);
     }
@@ -156,8 +148,7 @@ Project sampleProject() {
     title.outPoint = TimeValue::seconds(5.0);
     title.expanded = true;
     {
-        // Position is a percentage of the frame, so it rises from below the lower
-        // third to just under centre rather than being stored in pixels.
+        // Position is a frame percentage, not pixels.
         if (Property* pos = title.find("position"); pos != nullptr) {
             animate(*pos, ctx, {0.6, 1.3, 2.66, 4.4}, Value::vec2(50.0, 88.0),
                     Value::vec2(50.0, 42.0));

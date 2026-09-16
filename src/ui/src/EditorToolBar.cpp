@@ -16,17 +16,8 @@ using namespace theme;
 
 namespace {
 
-// The nine tools, drawn as vector paths rather than text glyphs. Several of those
-// glyphs carry Unicode emoji presentation, so the hand rendered in full colour and
-// broke the tool bar's monochrome run.
-// AE's order, minus everything Ruby does not do. Selection first because it is the one
-// you return to; navigation next; then the transform tools; then the creation tools.
-//
-// Two that used to be here are gone. A separate Move tool did what Selection does, and
-// AE has never had one: Selection drags. A separate Mask tool did what Shape and Pen do,
-// because in AE drawing with a layer selected produces a mask rather than a shape layer.
-// Both were inherited from the original design handoff rather than from how the app
-// actually works, and both would have ended up duplicating a neighbour.
+// Vector paths, not text glyphs (some render as colour emoji). AE's order minus tools
+// Ruby doesn't have.
 constexpr ToolIcon kTools[] = {
     ToolIcon::Selection, ToolIcon::Hand,   ToolIcon::Zoom,
     ToolIcon::Rotation,  ToolIcon::Anchor, ToolIcon::Text,
@@ -44,10 +35,8 @@ ToolIcon EditorToolBar::toolAt(int index) noexcept {
 
 namespace {
 
-// Panel switches. Not tools: they change what the left dock shows rather than what a
-// click in the viewer does, so they get their own run at the end with a divider before
-// them. Putting them in the tool list would mean selecting one deselects your tool, which
-// is exactly the confusion the divider exists to prevent.
+// Panel switches, not tools: they change the left dock, not viewer clicks. Kept
+// separate (own divider) so picking one doesn't deselect the active tool.
 constexpr ToolIcon kPanels[] = {ToolIcon::Project, ToolIcon::Effects};
 constexpr int kPanelCount = static_cast<int>(std::size(kPanels));
 
@@ -56,9 +45,7 @@ constexpr const char* kPanelTips[] = {
     "Effects & Presets — search effects and presets, then drag one onto a layer",
 };
 
-// Name plus what it does. A bare name on an abstract glyph tells you what it is called,
-// not what it is for, and "Pan Behind" is the classic example of a name that explains
-// nothing to someone who has not already been taught it.
+// Name plus what it does; a bare name on an abstract glyph explains nothing.
 constexpr const char* kToolTips[] = {
     "Selection Tool — pick, move, scale and rotate layers in the viewer",
     "Hand Tool — pan the viewer without moving anything",
@@ -70,16 +57,11 @@ constexpr const char* kToolTips[] = {
     "Pen Tool — draw bezier paths and masks. Needs masks, which do not exist yet",
 };
 
-// Tools that are in the bar but have nothing to act on. Drawn dimmed and inert, the same
-// way Home is: present because they are coming, visibly unavailable because they are not
-// here. Leaving them looking live would be the lie the whole toolbar used to tell.
+// Tools with nothing to act on yet: drawn dimmed and inert, like Home.
 constexpr bool kToolReady[] = {true, true, true, true, true, true, false, false};
 
-// The right side of the bar, where After Effects lists workspaces.
-//
-// Ruby has no workspaces worth a permanent row: it has one layout, and the space is worth
-// more spent on the modes that are specific to this app. So the named entries here are
-// features, and workspace switching collapses to a menu.
+// Right side of the bar, where AE lists workspaces. Ruby has one layout, so this space
+// holds app-specific feature entries instead; workspace switching is just a menu.
 struct Feature {
     const char* label;
     const char* tip;
@@ -123,12 +105,8 @@ EditorToolBar::EditorToolBar(QWidget* parent) : QWidget(parent) {
 void EditorToolBar::relayout() {
     const int cy = (metrics::kToolBarH - metrics::kToolButtonH) / 2;
 
-    // Home, then the panel switches, then the tools, then the switches on the right, each
-    // run separated by a divider.
-    //
-    // The panel buttons sit at the far left so they are directly above the panel they
-    // control. A control that changes a thing should be next to the thing, and they were
-    // previously at the other end of the bar from it.
+    // Home, panel switches, tools, then the right-side switches, each run divider-
+    // separated. Panel buttons sit at the far left, above the panel they control.
     int x = kEdgePad;
     homeRect_ = QRect(x, cy, metrics::kToolButtonW, metrics::kToolButtonH);
     x += metrics::kToolButtonW;
@@ -157,8 +135,7 @@ void EditorToolBar::relayout() {
     dividerRect_ = QRect(x, 6, 1, metrics::kToolBarH - 12);
     x += 1 + 11;
 
-    // Laid out from the right edge inward, so the workspace menu stays pinned to the
-    // corner however wide the window is and the features sit beside it.
+    // Laid out from the right edge inward so the workspace menu stays pinned to the corner.
     const QFontMetrics rightFm(font());
     int rx = width() - kEdgePad - kWorkspaceW;
     workspaceRect_ = QRect(rx, 0, kWorkspaceW, metrics::kToolBarH);
@@ -181,13 +158,8 @@ void EditorToolBar::relayout() {
         x += kSwitchPillW + 16;
     }
 
-    // The bar is laid out from both ends and nothing was checking that the two runs meet.
-    // Narrow the window far enough and Motion Blur printed over Beat Analyzer, because
-    // each run knew where it started and neither knew where the other one stopped.
-    //
-    // The window has no minimum width of its own, so the bar states its own: what its
-    // contents actually measure. Everything else in the layout can shrink; a toolbar
-    // cannot, because none of it is text that could elide.
+    // Laid out from both ends, so the bar enforces its own minimum width (nothing here
+    // can elide) to keep the two runs from overlapping.
     const int rightRunW = featureRects_.isEmpty()
                               ? kEdgePad + kWorkspaceW
                               : width() - featureRects_.first().left();
@@ -223,8 +195,8 @@ void EditorToolBar::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.fillRect(rect(), kToolBar);
 
-    // Home. Dimmed, because it does nothing yet: a button drawn like every other one that
-    // ignores every click reads as broken, and a dimmed one reads as not ready.
+    // Home: dimmed since it does nothing yet — a live-looking button that ignores
+    // clicks reads as broken.
     paintToolIcon(p, homeRect_, ToolIcon::Home, kTextFaint);
     p.fillRect(homeDividerRect_, kDivider);
 
@@ -258,9 +230,7 @@ void EditorToolBar::paintEvent(QPaintEvent*) {
 
     p.fillRect(dividerRect_, kDivider);
 
-    // Named modes, then the workspace menu. Text rather than icons, the way AE lists
-    // workspaces: these are places to go, not tools to hold, and a word says that better
-    // than a glyph nobody has learned yet.
+    // Named modes then the workspace menu, as text (not icons) like AE's workspace list.
     p.setFont(font());
     for (int i = 0; i < featureRects_.size() && i < kFeatureCount; ++i) {
         const QRect r = featureRects_.at(i);
@@ -286,8 +256,7 @@ void EditorToolBar::paintEvent(QPaintEvent*) {
         paintSwitch(p, sw);
     }
 
-    // Machine and engine readouts live in the status bar now, not up here. This bar is
-    // for things you act on; that is for things you watch.
+    // Machine/engine readouts live in the status bar; this bar is for things you act on.
     p.setPen(kDivider);
     p.drawLine(0, height() - 1, width(), height() - 1);
 }
@@ -295,17 +264,14 @@ void EditorToolBar::paintEvent(QPaintEvent*) {
 void EditorToolBar::mousePressEvent(QMouseEvent* e) {
     const QPoint pos = e->position().toPoint();
 
-    // Deliberately inert until the project selector exists. It still swallows the click
-    // rather than falling through to whatever is behind it.
+    // Inert until the project selector exists; still swallows the click.
     if (homeRect_.contains(pos)) {
         return;
     }
 
     for (int i = 0; i < toolRects_.size(); ++i) {
         if (toolRects_.at(i).contains(pos)) {
-            // A tool with nothing to act on swallows the click rather than becoming the
-            // active tool. Selecting Pen and then having every viewer click do nothing is
-            // worse than the button simply not taking.
+            // A tool with nothing to act on swallows the click rather than becoming active.
             if (!kToolReady[i]) {
                 return;
             }
@@ -335,8 +301,7 @@ void EditorToolBar::mousePressEvent(QMouseEvent* e) {
     }
     for (int i = 0; i < featureRects_.size() && i < kFeatureCount; ++i) {
         if (featureRects_.at(i).contains(pos)) {
-            // A feature that does not exist swallows the click, like the tools that are
-            // waiting on something. Its tooltip is what explains why.
+            // Not-yet-built features swallow the click; the tooltip explains why.
             if (kFeatures[i].ready) {
                 emit featureTriggered(i);
             }
@@ -360,8 +325,7 @@ void EditorToolBar::mousePressEvent(QMouseEvent* e) {
 }
 
 bool EditorToolBar::event(QEvent* e) {
-    // The whole bar is one widget, so tooltips are resolved by hit-testing rather than
-    // by having a child per control.
+    // One widget, so tooltips are resolved by hit-testing rather than per-control children.
     if (e->type() == QEvent::ToolTip) {
         auto* help = static_cast<QHelpEvent*>(e);
         const QPoint pos = help->pos();

@@ -45,9 +45,7 @@ void ParamBag::scale(const std::string& key, double factor) {
     for (Keyframe& k : e->keys) {
         scaleValue(k.value);
     }
-    // An expression is left alone deliberately. Rescaling `wiggle(3, 40)` would mean
-    // parsing and rewriting someone's code, and getting that wrong is worse than leaving
-    // an expression that needs a human to look at it.
+    // Expressions aren't rescaled — rewriting someone's Lua is riskier than leaving it.
 }
 
 int runMigrations(const std::vector<MigrationStep>& steps, int from, int to,
@@ -56,8 +54,8 @@ int runMigrations(const std::vector<MigrationStep>& steps, int from, int to,
         return from;
     }
 
-    // Sorted rather than trusted, so a step appended out of order at the bottom of a list
-    // still runs in the right place. Declaration order is a comment; to_schema is the fact.
+    // Sorted by to_schema rather than trusted in declaration order, so out-of-order appends
+    // still run correctly.
     std::vector<const MigrationStep*> ordered;
     ordered.reserve(steps.size());
     for (const MigrationStep& s : steps) {
@@ -73,9 +71,7 @@ int runMigrations(const std::vector<MigrationStep>& steps, int from, int to,
     for (const MigrationStep* s : ordered) {
         s->apply(bag);
     }
-    // `to` regardless of whether every version had a step. A version with nothing to do is
-    // the normal case: most bumps add a parameter, and adding is handled by defaults
-    // rather than by a migration.
+    // Returns `to` even if some versions had no step — most bumps just add a defaulted param.
     return to;
 }
 

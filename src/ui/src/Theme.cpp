@@ -74,15 +74,13 @@ QFont numericFont(int pixelSize) {
     QFont f;
     f.setFamily(uiFontFamily());
     f.setPixelSize(pixelSize);
-    // Ask for tabular figures so digits do not shift width as a value changes. Fonts
-    // without the feature simply ignore it.
+    // Tabular figures so digits don't shift width as a value changes; ignored if unsupported.
     f.setFeature(QFont::Tag("tnum"), 1);
     return f;
 }
 
 QString styleSheet() {
-    // Scoped to named classes. No blanket QWidget rule: it would paint over the
-    // custom widgets that draw their own panel borders and tab strips.
+    // Scoped to named classes; a blanket QWidget rule would override custom-painted widgets.
     return QStringLiteral(R"(
 QMenuBar {
     background: %1;

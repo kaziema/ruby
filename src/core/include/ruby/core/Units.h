@@ -7,27 +7,21 @@ namespace ruby::core {
 
 // --- Parameter range ---------------------------------------------------------
 //
-// A hard limit and a slider are not the same thing, and conflating them is why so many
-// controls are unusable. Sapphire's most common documented range, by a factor of three
-// over anything else, is "0 or greater": a floor with no ceiling at all. A slider still
-// has to end somewhere, so it carries both numbers, and the place the slider ends is a
-// statement about where the useful values are, not about what is legal.
+// A hard limit and a slider range are not the same thing: the hard limit is what's
+// legal, the slider is where the useful values live. Many params have a floor but no
+// ceiling ("0 or greater"), yet the slider still needs an end.
 //
 //     Blur radius:  floor 0, no ceiling, slider ends at 20.
 //     Opacity:      hard 0 to 100, slider the same.
 //     Scale:        no limit either way (negative flips), slider -200 to 400.
-//
-// Before this existed nothing in Ruby was bounded. Opacity could be dragged to -4000%
-// and the drag step came from the parameter's unit, so every Normalized parameter
-// scrubbed at the same speed whether its useful range was 0..1 or 0..500.
 struct ParamRange {
-    // Absent means unbounded on that side. A value outside these is clamped wherever it
-    // comes from: a drag, a typed number, a keyframe, an expression.
+    // Absent means unbounded on that side; out-of-range values are clamped regardless
+    // of source (drag, typed, keyframe, expression).
     std::optional<double> minimum;
     std::optional<double> maximum;
 
-    // Where a slider or scrub gesture runs from and to. Always inside the hard range when
-    // there is one, usually much narrower when there is not.
+    // Where a slider/scrub gesture runs from and to. Inside the hard range when there
+    // is one, usually narrower when there isn't.
     double slider_min = 0.0;
     double slider_max = 1.0;
 
@@ -37,9 +31,8 @@ struct ParamRange {
         return v;
     }
 
-    // How far one pixel of horizontal drag should move the value. Derived from where the
-    // slider ends rather than from the unit, so a parameter that runs 0..500 scrubs five
-    // hundred times faster than one that runs 0..1 without anyone tuning it by hand.
+    // Value moved per pixel of horizontal drag, derived from the slider span (not the
+    // unit) so ranges scrub proportionally without manual tuning.
     [[nodiscard]] constexpr double dragStep() const noexcept {
         const double span = slider_max - slider_min;
         return (span > 0.0 ? span : 1.0) / 260.0;  // ~260px to cross the useful range
@@ -60,16 +53,12 @@ struct ParamRange {
 
 // --- Time -------------------------------------------------------------------
 //
-// Time is stored in beats or seconds, never frames unless the author
-// explicitly opts in. A frame is not a unit of time, it is time divided by this
-// project's framerate, so a preset authored as "3 frames" at 30fps plays twice as
-// fast at 60fps with no error and no warning.
-//
-// Beats exist on top of seconds because half a beat is 333ms at 90 BPM and 172ms
-// at 174 BPM. Anything meant to land on the music must be stored in beats.
-//
-// Frames remain available as opt-in for effects genuinely defined by discrete
-// frames: stutter, strobe, frame-hold, posterize-time, anime "on 2s" timing.
+// Stored in beats or seconds; frames only if the author opts in explicitly. A frame
+// isn't a unit of time, it's time / framerate, so "3 frames" plays twice as fast at
+// 60fps as at 30fps with no warning. Beats exist because a fixed beat fraction is a
+// different duration at different tempos; anything meant to land on the music must
+// be stored in beats. Frames stay available for effects genuinely defined by discrete
+// frames (stutter, strobe, posterize-time, anime "on 2s").
 
 enum class TimeMode {
     Beats,
@@ -93,22 +82,18 @@ struct TimeContext {
     bool has_beat_map = false;
 };
 
-// Resolve to seconds. Beats resolve against the project tempo.
-//
-// OPEN QUESTION: when has_beat_map is false we currently fall back to
-// TimeContext::bpm. The alternative is degrading to the seconds value the preset
-// author previewed at, which would require presets to carry both. Not decided.
+// Resolves to seconds; beats resolve against the project tempo.
+// OPEN QUESTION: with no beat map, falls back to TimeContext::bpm rather than the
+// seconds value the preset author previewed at. Not decided which is right.
 double to_seconds(TimeValue t, const TimeContext& ctx) noexcept;
 
-// Resolve to a frame index at the context's framerate. Frames mode passes through
-// exactly, which is the whole point of opting in.
+// Resolve to a frame index; Frames mode passes through exactly (the point of opting in).
 double to_frames(TimeValue t, const TimeContext& ctx) noexcept;
 
 // --- Space ------------------------------------------------------------------
 //
-// Every numeric parameter declares its unit. An AE preset authored on
-// 1920x1080 applies wrong to 1080x1920 because blur radii are stored in pixels.
-// Declaring percent_of_diagonal instead makes presets portable across resolutions.
+// Every numeric parameter declares its unit. Storing blur radii in raw pixels breaks
+// presets moved between resolutions; percent_of_diagonal keeps them portable.
 
 enum class SpatialUnit {
     Px,
@@ -116,14 +101,23 @@ enum class SpatialUnit {
     PercentOfHeight,
     PercentOfDiagonal,
     Degrees,
-    // A plain percentage that is already resolution independent: scale, opacity, effect
-    // amounts. Distinct from PercentOfWidth and friends, which resolve against the frame.
+    // Resolution-independent percentage (scale, opacity, effect amounts) — distinct
+    // from PercentOfWidth/etc., which resolve against the frame.
     Percent,
     Normalized,  // unitless, no suffix
+    // Display-only: the stored Value is linear amplitude/gain. Converted to dB for
+    // display and back on edit, so keyframe interpolation stays linear-amplitude
+    // (a correct fade) instead of linear-in-dB (audibly wrong, AE's own documented flaw).
+    Decibels,
 };
 
 // Suffix shown after the number in the UI. Empty for units that do not take one.
 [[nodiscard]] const char* unitSuffix(SpatialUnit unit) noexcept;
+
+// dB <-> linear amplitude, with -96dB as the silence floor (16-bit noise floor, matches
+// After Effects). linearToDecibels(0) and anything below the floor returns -96.
+[[nodiscard]] double linearToDecibels(double linear) noexcept;
+[[nodiscard]] double decibelsToLinear(double decibels) noexcept;
 
 struct FrameGeometry {
     int width = 1920;

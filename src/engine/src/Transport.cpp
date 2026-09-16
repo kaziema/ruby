@@ -22,8 +22,7 @@ void Transport::play() noexcept {
     if (duration_ <= 0.0) {
         return;
     }
-    // Pressing play at the very end restarts rather than doing nothing, which is what
-    // every editor does and what anyone expects.
+    // Play at the very end restarts rather than no-oping.
     if (time_ >= duration_) {
         time_ = 0.0;
     }
@@ -54,8 +53,7 @@ bool Transport::advance(double elapsedSeconds) noexcept {
 
     if (time_ >= duration_) {
         if (looping_ && duration_ > 0.0) {
-            // Wrap by the remainder, not to zero: a long stall should not lose the
-            // position it would have landed on.
+            // Wrap by remainder, not to zero, so a long stall doesn't lose position.
             time_ = std::fmod(time_, duration_);
         } else {
             time_ = duration_;

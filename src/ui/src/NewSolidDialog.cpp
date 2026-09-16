@@ -18,9 +18,7 @@ NewSolidDialog::NewSolidDialog(int compWidth, int compHeight, QWidget* parent)
     : QDialog(parent),
       compWidth_(compWidth > 0 ? compWidth : 1080),
       compHeight_(compHeight > 0 ? compHeight : 1920),
-      // Mid grey, not black and not white. A new solid should be visible against the
-      // near-black outside the frame and against most footage, without looking like a
-      // deliberate design choice somebody has to undo.
+      // Mid grey: visible against the near-black frame surround and against most footage.
       color_(QColor(128, 128, 128)) {
     setWindowTitle(QStringLiteral("Solid Settings"));
     setModal(true);
@@ -79,8 +77,7 @@ void NewSolidDialog::pickColor() {
 }
 
 void NewSolidDialog::updateSwatch() {
-    // The button is the swatch. A separate preview square next to a button labelled
-    // "Choose..." is two controls doing one job.
+    // The button itself is the swatch, rather than a separate preview + picker button.
     swatch_->setStyleSheet(
         QStringLiteral("background: %1; border: 1px solid %2;")
             .arg(color_.name(), kFieldBorder.name()));
@@ -94,8 +91,7 @@ NewSolidDialog::Settings NewSolidDialog::settings() const {
         out.name = QStringLiteral("Solid");
     }
     out.color = color_;
-    // Stored as 0 when it matches the composition, so the solid keeps following a comp
-    // that gets resized instead of being pinned to today's numbers.
+    // Stored as 0 when matching the composition, so it keeps following comp resizes.
     out.width = (width_->value() == compWidth_) ? 0 : width_->value();
     out.height = (height_->value() == compHeight_) ? 0 : height_->value();
     return out;

@@ -29,9 +29,7 @@ QString formatDuration(double seconds) {
         .arg(total % 60, 2, 10, QLatin1Char('0'));
 }
 
-// Relative for anything recent, then a date. "3 days ago" answers "is this the clip I
-// pulled in this morning?" without making you do arithmetic; a date six months out is
-// more useful than "184 days ago".
+// Relative for recent items, then a plain date once "N days ago" stops being useful.
 QString formatAdded(std::int64_t epochSeconds) {
     if (epochSeconds <= 0) {
         return QStringLiteral("—");
@@ -99,8 +97,8 @@ void PooledMediaPanel::rebuild() {
         row.duration = formatDuration(item.duration);
         row.added = formatAdded(item.firstSeen);
         row.swatch = swatchFor(item.kind);
-        // Checked every refresh rather than stored: a file can be moved while the app is
-        // open, and a cached answer would go stale exactly when it matters.
+        // Checked every refresh rather than cached, since files can move while the app
+        // is open.
         row.missing = !QFileInfo::exists(QString::fromStdString(item.path));
         rows_.push_back(std::move(row));
     }
@@ -152,8 +150,7 @@ void PooledMediaPanel::paintEvent(QPaintEvent*) {
         return;
     }
 
-    // The folder row. One root for now, always open, so the list reads as "inside a
-    // folder" the way the project panel's compositions do.
+    // The folder row: one root for now, always open.
     p.setFont(font());
     p.fillRect(QRect(0, metrics::kColumnHeaderH, width(), metrics::kProjectRowH),
                kSubToolbar);
@@ -190,9 +187,8 @@ void PooledMediaPanel::paintEvent(QPaintEvent*) {
         p.setPen(kFieldBorder);
         p.drawRect(QRect(swatchX, y + (metrics::kProjectRowH - 10) / 2, 13, 10));
 
-        // A missing file stays in the list and says so. The promise is "everything ever
-        // imported", and quietly dropping the row breaks that promise at the exact moment
-        // it is most useful: when you are trying to work out where something went.
+        // Missing files stay listed (marked, not dropped) — this is a record of
+        // everything ever imported.
         p.setPen(row.missing            ? kTextFaint
                  : i == selected_       ? kTextSelectedLayer
                                         : kTextBody);

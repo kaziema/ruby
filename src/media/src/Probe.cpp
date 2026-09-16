@@ -45,8 +45,7 @@ std::optional<MediaInfo> probe(const std::string& path) {
         info.duration = std::max(info.duration, streamDuration);
 
         if (codec->codec_type == AVMEDIA_TYPE_VIDEO && !info.hasVideo) {
-            // Attached cover art is a video stream that is really a still image, and
-            // treating it as footage would give an album's artwork a frame rate.
+            // Attached cover art is a video stream but not footage; skip it.
             if ((stream->disposition & AV_DISPOSITION_ATTACHED_PIC) != 0) {
                 continue;
             }

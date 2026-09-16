@@ -23,9 +23,8 @@ StatusReadout::StatusReadout(QWidget* parent) : QWidget(parent) {
 
 void StatusReadout::setItems(std::vector<Item> items) {
     items_ = std::move(items);
-    // updateGeometry() alone is not enough inside a QStatusBar: it sizes permanent
-    // widgets once and does not re-run its layout for a changed hint, so the widget
-    // keeps whatever tiny width it had when it was empty and paints into nothing.
+    // updateGeometry() alone doesn't resize inside QStatusBar: it sizes permanent
+    // widgets once, so width/resize are forced explicitly.
     const QSize wanted = sizeHint();
     setMinimumSize(wanted);
     resize(wanted);

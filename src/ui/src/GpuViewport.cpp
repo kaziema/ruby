@@ -49,10 +49,8 @@ void GpuViewport::ensureSurface() {
     if (device_ == nullptr || surface_ != nullptr) {
         return;
     }
-    // winId() forces window creation, which is why this cannot run in the constructor:
-    // the widget has no native window until it is about to be shown. Some platforms
-    // (Qt's offscreen plugin) never produce one, and a blank viewport is the right
-    // outcome there rather than a failure.
+    // winId() forces window creation, so this can't run in the constructor. Some
+    // platforms (offscreen plugin) never produce one; a blank viewport is fine there.
     const WId handle = winId();
     if (handle == 0) {
         return;
@@ -87,12 +85,9 @@ void GpuViewport::resizeEvent(QResizeEvent* e) {
     configureSurface();
 }
 
-// Rasterise text layers and get them onto the GPU.
-//
-// Keyed on a hash of everything that changes the picture: the string, the font, the size,
-// the colours, alignment, tracking, line height. Change any of them and the key moves and
-// the layer is redrawn; change the layer's position or opacity and it is not, because
-// those are the compositor's job and the pixels have not changed.
+// Rasterises text layers and uploads them. Keyed on a hash of everything that affects
+// pixels (text, font, size, color, alignment, tracking, line height) — not position or
+// opacity, which the compositor handles without a re-rasterise.
 void GpuViewport::refreshTextTextures() {
     if (device_ == nullptr || comp_ == nullptr) {
         textTextures_.clear();
@@ -124,9 +119,8 @@ void GpuViewport::refreshTextTextures() {
             continue;
         }
 
-        // Rasterised at composition resolution rather than at a fixed size that then gets
-        // scaled. Scaled type is mush, and captions are the one thing in a short-form edit
-        // that has to stay sharp.
+        // Rasterised at composition resolution, not a fixed size then scaled — scaled
+        // type is mush.
         const TextRaster raster = rasteriseText(layer, 1.0);
         if (!raster.valid()) {
             continue;
@@ -153,8 +147,7 @@ void GpuViewport::refreshTextTextures() {
         kept.emplace(layer.id, std::move(made));
     }
 
-    // Anything not rebuilt this pass belonged to a layer that is gone or is no longer
-    // text, and its texture goes with it.
+    // Anything not rebuilt this pass belongs to a removed/non-text layer; drop it.
     textTextures_ = std::move(kept);
 }
 
@@ -177,9 +170,8 @@ void GpuViewport::paintEvent(QPaintEvent*) {
         for (const auto& [id, text] : textTextures_) {
             external.emplace(id, engine::Compositor::External{text.texture, text.width,
                                                               text.height});
-            // The graph cannot hash pixels it has never seen. This is the same number the
-            // re-rasterise check above uses, which is the point: if it did not change, the
-            // raster did not change, so the frame did not.
+            // Same key the re-rasterise check above uses: unchanged key means unchanged
+            // raster.
             keys.emplace(id, static_cast<std::uint64_t>(text.key));
         }
         const engine::Compositor::Overlay overlay = buildOverlay();
@@ -196,10 +188,6 @@ void GpuViewport::paintEvent(QPaintEvent*) {
 }
 
 // --- direct manipulation ------------------------------------------------------
-//
-// The tools in the toolbar were drawn and inert: the only way to move a layer was to type
-// a number into the inspector. This is the other half of that, and it is the half people
-// reach for first.
 
 void GpuViewport::setTool(ToolIcon tool) {
     if (tool_ == tool) {
@@ -235,8 +223,7 @@ core::Transform2D unitToWidget(const core::Composition& comp, const core::Layer&
                                const engine::FrameFit& fit) {
     const core::LayerSize size = sizes ? sizes(layer) : core::LayerSize{};
     const core::TimeContext ctx = comp.timeContext();
-    // Exactly the chain the compositor draws with, in the same order. Anything else and
-    // the handles sit somewhere the layer is not.
+    // Must match the compositor's exact chain order, or handles land off the layer.
     const core::Transform2D unitToLayer =
         core::Transform2D::translate(-0.5, -0.5)
             .then(core::Transform2D::scale(size.width, size.height));
@@ -249,10 +236,8 @@ core::Transform2D unitToWidget(const core::Composition& comp, const core::Layer&
     return unitToLayer.then(toComp).then(compToWidget);
 }
 
-// The eight resize handles, in the same unit-box coordinates the overlay is drawn in
-// (0,0 is the top-left of the layer's own box, 1,1 the bottom-right). One table drives
-// both where they are painted and where a click is allowed to grab one, so a handle can
-// never be drawn somewhere a drag does not agree it is.
+// The eight resize handles, in unit-box coords (0,0 top-left, 1,1 bottom-right).
+// One table drives both drawing and hit-testing, so they can't disagree.
 struct HandleSpec {
     double u, v;
     bool affectsX, affectsY;  // which axis of scale dragging this handle changes
@@ -270,9 +255,8 @@ constexpr HandleSpec kHandles[8] = {
     {1.0, 0.5, true, false, 5.0},   // right edge
 };
 
-// The handle nearest a click, if any is close enough to count as a grab rather than a
-// click past it. A little more forgiving than the drawn marker size, same as any small
-// hit target.
+// Nearest handle within hit radius, or none. Radius is a bit larger than the drawn
+// marker, like any small hit target.
 std::optional<HandleSpec> hitHandle(const core::Transform2D& toWidget,
                                     const QPointF& surfacePos) {
     constexpr double kHitRadius = 9.0;
@@ -303,8 +287,7 @@ engine::FrameFit GpuViewport::surfaceFit() const {
     if (comp_ == nullptr) {
         return {};
     }
-    // The same numbers configureSurface gave the swapchain, which are the same numbers the
-    // compositor drew with.
+    // Same numbers configureSurface gave the swapchain, which the compositor drew with.
     const double dpr = devicePixelRatioF();
     return engine::Compositor::fitFor(*comp_, static_cast<double>(width()) * dpr,
                                       static_cast<double>(height()) * dpr);
@@ -317,8 +300,7 @@ std::optional<core::LayerId> GpuViewport::layerAt(const QPointF& surfacePos) con
     const engine::FrameFit fit = surfaceFit();
     const core::TimeContext ctx = comp_->timeContext();
 
-    // Topmost first, which is the order the list is already in and the reverse of the draw
-    // order: the thing drawn last is the thing you are looking at.
+    // Topmost first (list order), i.e. reverse draw order.
     for (const core::Layer& layer : comp_->layers) {
         if (!layer.enabled || layer.locked || layer.kind == core::LayerKind::Audio ||
             layer.kind == core::LayerKind::Null) {
@@ -356,8 +338,7 @@ engine::Compositor::Overlay GpuViewport::buildOverlay() const {
     const auto at = [&toWidget](double u, double v) {
         return QPointF(toWidget.applyX(u, v), toWidget.applyY(u, v));
     };
-    // A square centred on a point, upright in SCREEN space. Handles that rotate with the
-    // layer are harder to grab and tell you nothing you cannot already see from the edges.
+    // Square centered on a point, upright in screen space (not rotated with the layer).
     const auto marker = [&out](const QPointF& p, double size, float r, float g, float b) {
         const double h = size * 0.5;
         out.push_back({core::Transform2D::scale(size, size)
@@ -389,15 +370,13 @@ engine::Compositor::Overlay GpuViewport::buildOverlay() const {
     line(br, bl);
     line(bl, tl);
 
-    // The same eight handles hit-testing grabs for a scale drag, so the box always shows
-    // exactly what it will let you grab.
+    // Same handle table hitHandle() uses, so drawn handles match what's grabbable.
     for (const HandleSpec& h : kHandles) {
         marker(at(h.u, h.v), h.markerSize, 0.9f, 0.9f, 0.9f);
     }
 
-    // The anchor point, which is what rotation and scale pivot around. Drawn always rather
-    // than only with the Anchor tool: not knowing where the pivot is is the single most
-    // common reason a rotation goes somewhere unexpected.
+    // Anchor/pivot point. Always drawn, not just with the Anchor tool, since an unseen
+    // pivot is the usual cause of a surprising rotation.
     const core::TimeContext ctx = comp_->timeContext();
     const core::Property* ap = layer->find("anchor_point");
     const core::Value a = ap != nullptr ? core::evaluate(*layer, *ap, currentTime_, ctx)
@@ -419,8 +398,7 @@ QPointF pivotInComp(const core::Composition& comp, const core::Layer& layer, dou
     const core::Transform2D toComp = core::resolvedTransform(
         comp, layer, seconds, ctx, static_cast<double>(comp.width),
         static_cast<double>(comp.height), sizes);
-    // The anchor is the origin of layer space, so the pivot is wherever layer space's
-    // origin lands. No need to know the layer's size at all.
+    // Anchor is the origin of layer space, so the pivot is just where that origin lands.
     return QPointF(toComp.applyX(0.0, 0.0), toComp.applyY(0.0, 0.0));
 }
 
@@ -430,9 +408,8 @@ core::Value valueOf(const core::Layer& layer, const char* key, double seconds,
     return p != nullptr ? core::evaluate(layer, *p, seconds, ctx) : fallback;
 }
 
-// Writes a value the way the inspector does: onto the keyframe at the playhead when the
-// property is animated, onto the static value when it is not. Dragging a layer that has
-// keyframes has to add one, or the drag fights the animation and loses.
+// Writes like the inspector does: new keyframe at playhead if animated, else the
+// static value. Otherwise the drag fights the existing animation.
 void writeValue(core::Property& prop, const core::Value& v, double seconds,
                 const core::TimeContext& ctx) {
     if (prop.animated()) {
@@ -455,21 +432,17 @@ void GpuViewport::mousePressEvent(QMouseEvent* e) {
         QWidget::mousePressEvent(e);
         return;
     }
-    // Converted once, at the door. Everything below is in surface pixels, which is the
-    // space the picture was actually drawn in.
+    // Converted once here; everything below works in surface pixels (what was drawn).
     const QPointF pos = toSurface(e->position());
 
-    // Hand, Zoom, Shape, Pen and Text do nothing here yet. They swallow the click rather
-    // than falling through to selecting a layer, because a tool that quietly does a
-    // different tool's job is worse than one that does nothing.
+    // Hand/Zoom/Shape/Pen/Text: no-op for now, but swallow the click rather than fall
+    // through to selection.
     if (tool_ != ToolIcon::Selection && tool_ != ToolIcon::Rotation &&
         tool_ != ToolIcon::Anchor) {
         return;
     }
 
-    // A handle on the layer that is already selected takes priority over re-picking:
-    // grabbing the corner of the thing you have selected resizes it, rather than starting
-    // a fresh click-to-select underneath it.
+    // A handle on the already-selected layer takes priority over re-picking underneath it.
     if (tool_ == ToolIcon::Selection && selected_.has_value()) {
         if (const core::Layer* layer = comp_->find(*selected_);
             layer != nullptr && layer->kind != core::LayerKind::Audio) {
@@ -555,10 +528,8 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             if (p == nullptr || fit.scale <= 0.0) {
                 return;
             }
-            // The drag is measured in COMPOSITION pixels, not widget pixels, so the layer
-            // keeps up with the cursor at any zoom. Then into the parent's space, because
-            // Position is stored there and a child of a scaled parent would otherwise move
-            // at the wrong rate.
+            // Measured in composition pixels (not widget) so it tracks the cursor at any
+            // zoom, then converted into parent space since Position is stored there.
             double dx = (pos.x() - grabStart_.x()) / fit.scale;
             double dy = (pos.y() - grabStart_.y()) / fit.scale;
             if (layer->parent.has_value()) {
@@ -576,8 +547,7 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
                     dy = uy;
                 }
             }
-            // Shift constrains to one axis, decided by whichever the drag committed to
-            // first rather than re-decided every mouse move.
+            // Shift constrains to one axis, decided once rather than every move.
             if (e->modifiers().testFlag(Qt::ShiftModifier)) {
                 if (std::fabs(pos.x() - grabStart_.x()) >
                     std::fabs(pos.y() - grabStart_.y())) {
@@ -602,8 +572,7 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             const double px = fit.toTargetX(pivot.x());
             const double py = fit.toTargetY(pivot.y());
             double deg = std::atan2(pos.y() - py, pos.x() - px) * 180.0 / M_PI - grabAngle_;
-            // Shift snaps to 15 degrees, which is what makes "exactly upright" and
-            // "exactly a quarter turn" reachable by hand.
+            // Shift snaps to 15 degree increments.
             double value = grabOriginal_.c[0] + deg;
             if (e->modifiers().testFlag(Qt::ShiftModifier)) {
                 value = std::round(value / 15.0) * 15.0;
@@ -616,10 +585,9 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             if (p == nullptr || fit.scale <= 0.0 || !layerSizes_) {
                 return;
             }
-            // The anchor is a percentage of the LAYER, and the drag arrives in screen
-            // pixels, so it has to come back through the layer's own transform. Moving it
-            // in composition pixels would be wrong the moment the layer is scaled or
-            // rotated, which is exactly when anyone reaches for this tool.
+            // Anchor is a % of the layer, drag arrives in screen pixels, so invert through
+            // the layer's own transform — composition pixels would be wrong once
+            // scaled/rotated.
             const core::Transform2D back =
                 unitToWidget(*comp_, *layer, currentTime_, layerSizes_, fit).inverse();
             const double u0 = back.applyX(grabStart_.x(), grabStart_.y());
@@ -637,10 +605,9 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             if (p == nullptr) {
                 return;
             }
-            // The mouse position put back through the box-to-widget transform as it stood
-            // at press, fixed for the whole drag exactly like Rotate fixes its pivot angle
-            // at press: recomputing it against the layer's own live (already-changing)
-            // scale would make the math chase a target that moves because of the math.
+            // Uses the box-to-widget transform as it stood at press, held fixed for the
+            // drag (same as Rotate's fixed pivot angle), so the math doesn't chase its
+            // own output.
             const double u1 = grabBack_.applyX(pos.x(), pos.y());
             const double v1 = grabBack_.applyY(pos.x(), pos.y());
 
@@ -649,9 +616,8 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             const double au = 0.5 + anchor.c[0] / 100.0;
             const double av = 0.5 + anchor.c[1] / 100.0;
 
-            // Scale pivots at the anchor point, same as Rotate, so the new scale is
-            // whatever ratio keeps the grabbed handle under the cursor, measured as the
-            // handle's distance from the anchor before and after the drag.
+            // Pivots at the anchor point; new scale is whatever ratio keeps the grabbed
+            // handle under the cursor.
             double sx = grabOriginal_.c[0];
             double sy = grabOriginal_.c[1];
             constexpr double kMinDenom = 1e-3;
@@ -661,8 +627,7 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
             if (grabAffectsY_ && std::fabs(grabHandleV_ - av) > kMinDenom) {
                 sy = grabOriginal_.c[1] * (v1 - av) / (grabHandleV_ - av);
             }
-            // Shift on a corner handle keeps the aspect ratio, driven by whichever axis
-            // moved further, the same "decide from the bigger delta" rule Move uses.
+            // Shift on a corner handle keeps aspect ratio, driven by the larger-delta axis.
             if (grabAffectsX_ && grabAffectsY_ &&
                 e->modifiers().testFlag(Qt::ShiftModifier)) {
                 const double rx = grabOriginal_.c[0] != 0.0 ? sx / grabOriginal_.c[0] : 1.0;
@@ -704,9 +669,8 @@ std::vector<std::pair<double, bool>> GpuViewport::cachedFrames(double from,
         keys.emplace(id, static_cast<std::uint64_t>(text.key));
     }
 
-    // Capped. A three hour composition at 60fps is 648,000 frames and nobody is drawing
-    // 648,000 rectangles into a four pixel strip; past a few thousand the answer is the
-    // same and the work is not.
+    // Capped: a long comp at 60fps is hundreds of thousands of frames, far more than a
+    // pixel-strip UI needs to draw.
     const auto first = static_cast<std::int64_t>(std::floor(from * fps));
     const auto last = static_cast<std::int64_t>(std::ceil(to * fps));
     constexpr std::int64_t kMaxFrames = 4000;
@@ -717,9 +681,8 @@ std::vector<std::pair<double, bool>> GpuViewport::cachedFrames(double from,
         const engine::RenderGraph graph =
             engine::Compositor::graphFor(*project_, *comp_, t, &keys);
 
-        // A frame is ready when every layer that needs a cached texture has one. A layer
-        // with no effects needs nothing: its source is its output and the decoder holds
-        // it, so it can never be the reason a frame is not ready.
+        // Ready when every layer needing a cached texture has one; a layer with no
+        // effects needs nothing since its source is its own output.
         bool ready = graph.root >= 0;
         for (const int node : graph.nodes[static_cast<std::size_t>(graph.root)].inputs) {
             const engine::RenderNode& n = graph.nodes[static_cast<std::size_t>(node)];

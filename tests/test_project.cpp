@@ -1,5 +1,4 @@
-// The media pool. Layers reference imported files by id rather than carrying a path,
-// so two layers on one clip are genuinely the same source.
+// Layers reference imported files by id, not path, so two layers on one clip share a source.
 
 #include <cstdio>
 #include <cstdlib>
@@ -32,8 +31,7 @@ int main() {
     check(first.id != 0, "an imported item gets an id");
     check(project.media().size() == 1, "and lands in the pool");
 
-    // Importing the same file twice is something people do constantly. It has to be a
-    // no-op, not a second entry that quietly doubles the decoders later.
+    // Re-importing the same path must be a no-op, not a duplicate entry.
     const MediaId firstId = first.id;
     MediaItem& again = importClip(project, "/clips/a.mp4", "a.mp4");
     check(again.id == firstId, "re-importing the same path returns the same item");
@@ -51,15 +49,13 @@ int main() {
     Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 12.0);
     Layer& layer = project.addLayer(comp, "a.mp4", LayerKind::Footage);
 
-    // A layer with no source resolves to nothing rather than to a broken path.
     check(project.pathFor(layer).empty(), "an unlinked layer has no file");
 
     layer.media = firstId;
     check(project.pathFor(comp.layers.front()) == "/clips/a.mp4",
           "a linked layer resolves through the pool");
 
-    // A dangling reference has to fail quietly. Deleting a pool item must not make the
-    // compositor try to open a garbage path.
+    // A dangling media reference must fail quietly, not resolve to a garbage path.
     comp.layers.front().media = 4242;
     check(project.pathFor(comp.layers.front()).empty(),
           "a reference to a missing item resolves to nothing");

@@ -18,9 +18,8 @@ using MediaId = std::uint64_t;
 
 // --- Media pool --------------------------------------------------------------
 //
-// Imported files live here once, and layers reference them by id. Two layers using
-// the same clip share one entry, which is what lets them share a decoder later, and it
-// means moving a file is a single fix rather than a hunt through every layer.
+// Imported files live here once; layers reference them by id, so moving a file or
+// sharing a decoder is a single fix, not a hunt through every layer.
 
 enum class MediaKind {
     Video,   // has picture, may also have sound
@@ -46,17 +45,12 @@ struct MediaItem {
 
 // --- Rhythm map --------------------------------------------------------------
 //
-// Pillar 2: the rhythm of the track is a document object, not markers the user places.
+// The track's rhythm is a document object, not user-placed markers. Two lanes: beats
+// are a periodic grid to quantize against, vocal onsets are an aperiodic list where
+// "snap to the half beat" doesn't apply.
 //
-// Two lanes, because they are not two versions of one thing. Beats are a periodic grid
-// you can quantise against; vocal onsets are an
-// aperiodic list where "snap to the half beat" is meaningless. A measured edit cut to
-// syllables at 29ms median while a fitted beat grid landed on the audio worse than a
-// random offset, so the vocal lane is not an edge case.
-//
-// Detection lives in the private `beat` module. This type is public, and an EMPTY
-// MAP IS AN ORDINARY LEGAL STATE: in the public build it always will be. Every query
-// degrades to a no-op rather than failing.
+// Detection lives in the private `beat` module; this type is public. An empty map is
+// an ordinary legal state — every query degrades to a no-op rather than failing.
 
 enum class MarkerLane {
     Beat,      // an ordinary beat
@@ -76,8 +70,8 @@ class RhythmMap {
 public:
     RhythmMap() = default;
 
-    // Replaces one lane, leaving the others alone. User markers are never touched by
-    // this: re-analysis must not discard a correction someone made by hand.
+    // Replaces one lane; user markers are never touched, so re-analysis can't discard
+    // a manual correction.
     void setLane(MarkerLane lane, std::vector<Marker> markers);
     void clearLane(MarkerLane lane);
 
@@ -97,8 +91,8 @@ public:
                                                   std::initializer_list<MarkerLane> lanes)
         const;
 
-    // Returns the input unchanged when there is nothing to snap to, so callers never
-    // special-case an unanalysed project.
+    // Returns input unchanged if nothing to snap to, so callers never special-case
+    // an unanalyzed project.
     [[nodiscard]] double snap(double seconds) const;
     [[nodiscard]] double snapTo(double seconds,
                                 std::initializer_list<MarkerLane> lanes) const;
@@ -147,8 +141,7 @@ enum class BlendMode {
     Darken,
 };
 
-// Label colours per the design: lavender for text and shape, aqua for precomps,
-// gray for footage, green for audio. An enum, so the UI owns the actual hexes.
+// Enum so the UI owns the actual hex values.
 enum class LabelColor {
     Lavender,
     Aqua,
@@ -158,11 +151,8 @@ enum class LabelColor {
 
 [[nodiscard]] LabelColor defaultLabelFor(LayerKind kind) noexcept;
 
-// One effect applied to a layer.
-//
-// Parameters are Properties, so every effect control animates for free and shows up in
-// the timeline like any other. `effectId` and `schema` are the identity pair: the id is
-// immortal and the schema version decides which migrations a loaded preset runs.
+// One effect applied to a layer. Parameters are Properties, so every control animates
+// for free. `effectId`+`schema` are the identity pair driving migrations.
 struct EffectInstance {
     std::string effectId;
     int schema = 1;
@@ -175,9 +165,8 @@ struct EffectInstance {
     [[nodiscard]] const Property* find(std::string_view key) const noexcept;
 };
 
-// Min/max per time bucket, precomputed for drawing. Plain data on purpose: the document
-// should not know what a decoder is, and drawing a waveform from raw samples would mean
-// touching millions of values on every repaint.
+// Min/max per time bucket, precomputed for drawing — avoids touching millions of raw
+// samples per repaint, and keeps the document decoder-agnostic.
 struct Waveform {
     double bucketsPerSecond = 0.0;
     std::vector<float> low;
@@ -204,21 +193,14 @@ struct Layer {
     bool audioEnabled = true;  // the speaker: whether it is heard
     bool solo = false;
 
-    // The padlock. Refuses everything that would change the layer: selecting it, moving
-    // or trimming its bar, its blend mode, its parent, its keyframes. Visibility, audio,
-    // solo and twirling it open stay live, because none of those change what the layer
-    // is, and half of why you lock a layer is to keep looking at it while you work
-    // around it.
+    // Blocks anything that changes the layer (select, move, trim, blend, parent,
+    // keyframes). Visibility/audio/solo/expand stay live — locking is often to keep
+    // watching a layer while working around it.
     bool locked = false;
 
-    // Text layers only.
-    //
-    // A structured model rather than a blob of HTML. Olive stores rich text as HTML, which
-    // is convenient right up until the project format quietly depends on which HTML subset
-    // this version of Qt understands. These fields mean the same thing in ten years.
-    //
-    // One style for the whole layer in v1. Per-run styling and AE-style animator groups
-    // both build on top of this rather than replacing it.
+    // Text layers only. Structured fields, not an HTML blob, so the format doesn't
+    // depend on a specific Qt version's HTML subset. One style for the whole layer in
+    // v1; per-run styling builds on top later rather than replacing this.
     std::string text;
     std::string fontFamily = "Helvetica";
     double fontSize = 72.0;      // points at 96 DPI, fixed so a size means one thing
@@ -229,23 +211,16 @@ struct Layer {
     double strokeWidth = 0.0;    // 0 disables the stroke entirely
     TextAlign textAlign = TextAlign::Center;
 
-    // Solid layers only.
-    //
-    // A solid carries its own size rather than always filling the frame, because half of
-    // what solids are for is being a bar, a card or a letterbox band. Zero means "match
-    // the composition", so a solid made today still fills a composition that is resized
-    // tomorrow instead of being frozen at the size it happened to be created at.
+    // Solid layers only. Carries its own size (solids are often bars/cards/letterbox
+    // bands). Zero means match the composition, so resizing later doesn't freeze old
+    // solids at their creation size.
     Value solidColor = Value::rgba(0.5, 0.5, 0.5, 1.0);
     int solidWidth = 0;
     int solidHeight = 0;
     bool expanded = false;  // twirled open in the timeline
 
-    // Whether the Transform group under the twirl is open. Separate from `expanded`
-    // because they answer different questions: one is "show me this layer's insides",
-    // the other is "show me the five transform rows in particular". A layer with four
-    // effects on it is mostly Transform rows you are not looking at.
-    //
-    // Defaults open so a project made before groups collapsed opens looking the same.
+    // Whether the Transform group is open, separate from `expanded` (layer twirl vs.
+    // this specific group). Defaults open so pre-groups projects look unchanged.
     bool transformExpanded = true;
 
     std::vector<Property> properties;
@@ -261,17 +236,18 @@ struct Layer {
 // The transform stack every layer gets, matching the design's inspector.
 [[nodiscard]] std::vector<Property> defaultTransform();
 
-// Re-applies the parts of a property that belong to its definition rather than to the
-// document: right now, its range.
-//
-// Ranges are deliberately NOT written to project files. A file that pinned its own limits
-// would freeze them forever, so widening a range later would leave every existing project
-// on the old one and there would be no way to tell. The file stores what the user chose;
-// the app supplies what the parameter is. This is the same reasoning as not storing an
-// effect's shader in the project.
-//
-// Called on load. Anything with no definition to match is left alone.
+// Re-applies the parts of a property owned by its definition rather than the document
+// (currently: range). Ranges aren't persisted — the file stores what the user chose,
+// the app supplies what the parameter currently is, so widening a range later reaches
+// old projects too. Called on load; unmatched properties are left alone.
 void adoptTransformRanges(Layer& layer);
+
+// Adds the "audio_level" property (key `kAudioLevelKey`) if the layer doesn't already
+// have one. Stored as linear gain, 1.0 = unity/0dB; the inspector displays it in dB via
+// SpatialUnit::Decibels. Called by addLayer() for new layers and on load for old ones,
+// same reason as adoptTransformRanges: layers saved before this existed must still work.
+inline constexpr const char* kAudioLevelKey = "audio_level";
+void ensureAudioLevel(Layer& layer);
 
 // --- Composition -------------------------------------------------------------
 
@@ -287,24 +263,17 @@ struct Composition {
     std::vector<Layer> layers;  // index 0 is the topmost layer, as in AE
     RhythmMap rhythm;
 
-    // The part you are working on, and the part you are delivering.
-    //
-    // One concept rather than two, which is AE's answer and the right one: those are the
-    // same range often enough that splitting them would mean setting the same thing twice
-    // and then wondering which one the export used. So this bounds what the preview cache
-    // fills AND what an export writes.
-    //
-    // Zero width means the whole composition, which is what a composition that has never
-    // had one set should mean. Nobody should have to drag brackets to the ends before
-    // anything works.
+    // The part being worked on and the part being delivered — one range, not two,
+    // since they're usually the same (bounds both the preview cache and export).
+    // Zero width means the whole composition, so a fresh comp works without dragging
+    // brackets first.
     TimeValue workIn = TimeValue::seconds(0.0);
     TimeValue workOut = TimeValue::seconds(0.0);
 
     [[nodiscard]] bool hasWorkArea() const noexcept;
 
-    // The work area if there is one, otherwise the whole composition. Every caller wants
-    // this rather than the raw pair, because "no work area" and "a work area covering
-    // everything" have to behave identically.
+    // Work area if set, else the whole composition — "no work area" and "full-range
+    // work area" must behave identically.
     void workRange(double& startSeconds, double& endSeconds) const noexcept;
 
     [[nodiscard]] TimeContext timeContext() const noexcept;
@@ -315,36 +284,19 @@ struct Composition {
 
     [[nodiscard]] int totalKeyframes() const noexcept;
 
-    // Splitting a layer needs a fresh id without going back to the project. Ids only
-    // have to be unique within the composition that holds them.
+    // Ids only need to be unique within this composition.
     [[nodiscard]] LayerId nextLayerId() const noexcept;
 
-    // Remove a layer, and with it any parent link pointing at it. Returns false if the
-    // id was not here.
-    //
-    // Clearing the children matters: a parent id that outlives its layer is a dangling
-    // reference that only bites later, when something walks the chain and finds nothing.
-    // Orphaning a child to the composition root is the recoverable failure; a link into
-    // a hole is not.
+    // Removes a layer and clears any parent link pointing at it — a dangling parent id
+    // bites later when something walks the chain. Returns false if the id wasn't found.
     bool removeLayer(LayerId layer) noexcept;
 
     // The time the last layer stops. 0.0 for an empty composition.
     [[nodiscard]] double contentEnd() const noexcept;
 
-    // Grow the composition so it contains all of its layers. Returns true if the
-    // duration actually changed.
-    //
-    // This only ever grows. A composition never shrinks itself, for two reasons.
-    //
-    // Growing is safe: nothing is hidden, nothing is lost, and the worst case is empty
-    // space at the end. Shrinking hides content, so it stays a deliberate act in
-    // Composition Settings. If deleting a layer silently pulled the end in, undo would
-    // restore the layer but you would also be fighting to get your duration back.
-    //
-    // And a composition is a source. Nest it in another composition and its duration is
-    // a stated fact about it, not a side effect of what happens to be inside it today.
-    // A duration that only ever moves outward can never invalidate a trim somebody
-    // already made downstream.
+    // Grows the composition to fit its layers. Returns true if duration changed.
+    // Only ever grows — shrinking hides content and must stay a deliberate act in
+    // Composition Settings; it would also invalidate trims made on this comp elsewhere.
     bool growToFit() noexcept;
 };
 
@@ -357,24 +309,19 @@ public:
 
     Layer& addLayer(Composition& comp, std::string name, LayerKind kind);
 
-    // Adds an already-probed file. Importing the same path twice returns the existing
-    // entry rather than duplicating it, because a project panel full of the same clip
-    // five times is nobody's idea of help.
+    // Adds an already-probed file. Re-importing the same path returns the existing
+    // entry rather than duplicating it.
     MediaItem& addMedia(std::string path, std::string name, MediaKind kind,
                         double duration, int width, int height, double fps,
                         bool hasAudio);
 
     [[nodiscard]] const std::vector<MediaItem>& media() const noexcept { return media_; }
 
-    // Removes a media item and clears every layer that referenced it.
-    //
-    // A layer whose media id points at nothing is worse than a layer with no media: the
-    // second draws a placeholder and the first tries to resolve a path that is not there.
-    // Returns how many layers were affected, so the caller can warn before doing it.
+    // Removes a media item and clears every layer referencing it (a dangling media id
+    // is worse than none). Returns affected layer count for a confirmation prompt.
     std::size_t removeMedia(MediaId media);
 
-    // How many layers, across every composition, use this item. The count you have to show
-    // someone before you delete something out from under them.
+    // How many layers, across every composition, use this item (for a delete confirmation).
     [[nodiscard]] std::size_t usageCount(MediaId media) const noexcept;
     [[nodiscard]] const MediaItem* findMedia(MediaId id) const noexcept;
     [[nodiscard]] const MediaItem* findMediaByPath(std::string_view path) const noexcept;
@@ -389,8 +336,8 @@ public:
 
     [[nodiscard]] Composition* find(CompId comp) noexcept;
 
-    // Loading restores ids from a file rather than minting new ones, so the generator
-    // has to be told what is already taken or the next new layer collides with an old.
+    // Loading restores ids from file rather than minting new; tells the generator
+    // what's taken so new ids don't collide.
     void noteUsedId(std::uint64_t id) noexcept;
 
 private:

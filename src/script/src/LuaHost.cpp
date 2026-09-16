@@ -5,9 +5,7 @@
 namespace ruby::script {
 namespace {
 
-// Enough to show the user what is broken without letting a comp full of bad expressions
-// grow a list faster than anyone reads it. Sixty frames of a broken expression is one
-// failure worth reporting, not sixty.
+// Enough to surface what's broken without the list growing faster than anyone reads it.
 constexpr std::size_t kMaxFailures = 32;
 
 }  // namespace
@@ -33,12 +31,10 @@ bool LuaHost::evaluate(const core::Property& prop, double seconds,
     box_->setProperty(&prop, &ctx);
     const Sandbox::Outcome outcome = box_->evaluate(source);
 
-    // Dropped as soon as the run is over. Holding a pointer to a property between calls
-    // is how you end up reading a layer that was deleted three frames ago.
+    // Cleared after each run; holding it between calls risks reading a deleted layer.
     box_->setProperty(nullptr, nullptr);
     if (!outcome.ok) {
-        // Recorded once per distinct expression, not once per frame. The same broken
-        // expression evaluated on every frame of a ten second comp is one problem.
+        // Recorded once per distinct expression, not once per frame.
         const bool known = std::any_of(
             failures_.begin(), failures_.end(),
             [&source](const Failure& f) { return f.source == source; });

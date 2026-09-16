@@ -8,13 +8,9 @@
 
 namespace ruby::ui {
 
-// Every piece of media ever imported into the app, in one folder, across every project.
-//
-// Painted the same way as the project panel rather than sharing its code. The two lists
-// look alike and behave differently: this one is app-scoped, has no compositions, has no
-// search yet, and has to show entries whose files are no longer on disk. Sharing the
-// widget would mean a growing pile of "if pool" branches through a class that is already
-// doing one job well.
+// Every piece of media ever imported, across every project, in one folder. Painted like
+// the project panel but not sharing its code: this one is app-scoped, has no
+// compositions, and can show entries whose files are gone.
 class PooledMediaPanel : public QWidget {
     Q_OBJECT
 

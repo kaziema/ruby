@@ -36,7 +36,6 @@ PooledItem clip(const char* path, std::int64_t firstSeen) {
     return item;
 }
 
-// Importing one clip into six projects should leave one entry, not six.
 void the_same_path_is_pooled_once() {
     MediaPool pool;
     check(pool.empty(), "a fresh pool is empty");
@@ -45,8 +44,6 @@ void the_same_path_is_pooled_once() {
     check(!pool.add(clip("/a/clip.mov", 2000)), "the same path again is not new");
     check(pool.items().size() == 1, "and did not add a second entry");
 
-    // First-seen is the whole point of the entry. Re-importing must not stamp it with
-    // today, or the pool stops being a history.
     check(pool.items().front().firstSeen == 1000, "the original first-seen time survived");
 
     check(!pool.add(clip("", 3000)), "an empty path is refused");
@@ -82,7 +79,6 @@ void a_pool_survives_a_round_trip() {
     std::filesystem::remove(file);
 }
 
-// The pool is a convenience. It must never be able to stop the app from opening.
 void a_broken_pool_is_an_empty_pool() {
     MediaPool missing;
     missing.load(tempFile("ruby_pool_does_not_exist.json"));

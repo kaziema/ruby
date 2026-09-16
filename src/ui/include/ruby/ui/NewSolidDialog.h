@@ -10,12 +10,8 @@ class QSpinBox;
 
 namespace ruby::ui {
 
-// Solid settings, the way AE asks for them: name, size, colour, and a button to snap the
-// size back to the composition.
-//
-// A solid you cannot colour is not worth making, and there is no colour control in the
-// inspector yet, so the dialog is currently the only way to set one. That is also AE's
-// flow, which is a decent sign it is not the wrong shape.
+// Solid settings: name, size, colour, and a button to snap size back to the
+// composition. Currently the only way to set colour, since the inspector has none yet.
 class NewSolidDialog : public QDialog {
     Q_OBJECT
 

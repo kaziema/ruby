@@ -15,12 +15,9 @@
 
 namespace ruby::ui {
 
-// A widget backed by a real GPU swapchain rather than by Qt's painter.
-//
-// Qt normally draws every widget into its own backing store and composites the result.
-// That fights a swapchain, which wants to own the window's pixels. WA_PaintOnScreen plus
-// a null paintEngine tells Qt to stay out of the way, and WA_NativeWindow guarantees an
-// actual NSView to hand to Dawn.
+// Widget backed by a real GPU swapchain rather than Qt's painter. WA_PaintOnScreen +
+// null paintEngine keep Qt out of the way; WA_NativeWindow guarantees a native window
+// handle to hand to Dawn.
 class GpuViewport : public QWidget {
     Q_OBJECT
 
@@ -48,8 +45,8 @@ public:
     void setLayerSizes(core::SizeOf sizes);
 
 signals:
-    // A layer was clicked in the picture. The window turns this into a real selection, so
-    // the timeline and the viewer never hold two different opinions about it.
+    // A layer was clicked. The window turns this into the real selection so timeline
+    // and viewer agree.
     void layerPicked(core::LayerId layer);
 
     // A drag began and ended, bracketing one undo step, and something changed in between.
@@ -74,28 +71,17 @@ private:
     void ensureSurface();
     void configureSurface();
 
-    // Rasterises every text layer that needs it and uploads the results. Cached on the
-    // layer's own text and style, so a comp full of captions costs one raster each rather
-    // than one per frame; scrubbing a static caption re-uploads nothing.
+    // Rasterises and uploads text layers that need it; cached on text+style, so
+    // scrubbing a static caption re-uploads nothing.
     void refreshTextTextures();
 
-    // Everything that has to agree with what was DRAWN works in surface pixels.
-    //
-    // This widget has two coordinate systems and they differ by the display's scale
-    // factor: Qt hands out mouse positions and widget sizes in logical points, while the
-    // swapchain, and therefore everything the compositor computed, is in physical pixels.
-    // Mixing them put the handles at half scale in the corner and made every click land on
-    // the wrong part of the picture.
-    //
-    // So there is exactly one conversion, here, and no site below computes its own.
+    // Widget positions are logical points; the swapchain (and everything the compositor
+    // computed) is in physical pixels. Convert once here — nowhere else should.
     [[nodiscard]] QPointF toSurface(const QPointF& widgetPos) const;
     [[nodiscard]] engine::FrameFit surfaceFit() const;
 
-    // The topmost layer whose quad contains this point, or nothing.
-    //
-    // Works by putting the point back through each layer's transform rather than by
-    // comparing against a bounding box: a rotated layer's box covers corners that are not
-    // the layer, and clicking one of those would select something you are not pointing at.
+    // Inverse-transforms into each layer's unit square rather than using a bounding box,
+    // since a rotated layer's box has clickable corners that aren't the layer.
     [[nodiscard]] std::optional<core::LayerId> layerAt(const QPointF& widgetPos) const;
 
     // Handles for the selected layer, in widget pixels.
@@ -108,8 +94,7 @@ private:
         std::size_t key = 0;  // hash of everything that changes the picture
     };
 
-    // What a drag is doing. Decided on press and fixed until release, because a gesture
-    // that changes meaning halfway through is a gesture nobody can aim.
+    // What a drag is doing. Fixed at press; can't change meaning mid-drag.
     enum class Grab { None, Move, Rotate, Anchor, Scale };
 
     ToolIcon tool_ = ToolIcon::Selection;
@@ -121,9 +106,8 @@ private:
     core::Value grabOriginal_;   // the property's value when the drag began
     double grabAngle_ = 0.0;     // for Rotate: the angle from the anchor at press
 
-    // For Scale: which handle was grabbed (in the same unit-box coordinates the handles
-    // are drawn in) and the box-to-widget transform as it stood at press, held fixed for
-    // the whole drag so the math below doesn't chase a target that is itself moving.
+    // For Scale: grabbed handle (unit-box coords) and the press-time box-to-widget
+    // transform, held fixed for the drag.
     double grabHandleU_ = 0.0;
     double grabHandleV_ = 0.0;
     bool grabAffectsX_ = true;
@@ -135,12 +119,8 @@ private:
     std::unique_ptr<engine::Compositor> compositor_;
 
 public:
-    // Which frames in a range are already held in RAM.
-    //
-    // Answered by building each frame's graph and asking the cache whether it holds every
-    // layer that frame needs. Building a graph is pure and cheap, and `contains` is
-    // deliberately not a lookup: drawing the cache bar must not reorder the cache, or the
-    // act of looking at what is ready changes what is ready.
+    // Which frames in a range are already cached in RAM. `contains` must not be a
+    // lookup — drawing the cache bar must not itself alter cache state.
     [[nodiscard]] std::vector<std::pair<double, bool>> cachedFrames(double from, double to)
         const;
 

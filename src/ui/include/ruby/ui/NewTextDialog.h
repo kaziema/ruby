@@ -14,8 +14,7 @@ class QPushButton;
 
 namespace ruby::ui {
 
-// Text settings. Doubles as the editor, since the inspector has no text field yet, so it
-// opens seeded when you edit an existing layer.
+// Text settings; doubles as the editor since the inspector has no text field yet.
 class NewTextDialog : public QDialog {
     Q_OBJECT
 

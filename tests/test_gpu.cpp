@@ -1,6 +1,4 @@
-// Brings the real GPU up. Not a mock: this creates a Dawn device against the actual
-// adapter, allocates on it, and submits work. If the graphics stack is broken, this
-// is where it should say so.
+// Brings up a real Dawn device against the actual adapter and submits real work.
 
 #include <cstdio>
 #include <cstdlib>
@@ -35,7 +33,6 @@ int main() {
     std::printf("adapter: %s\n", device->description().c_str());
     check(!device->description().empty(), "the adapter identifies itself");
 
-    // A working-format texture, the shape everything composites into.
     TextureDesc desc;
     desc.width = 1080;
     desc.height = 1920;
@@ -51,7 +48,6 @@ int main() {
         check(target->format() == TextureFormat::RGBA16Float, "texture reports its format");
     }
 
-    // Uniform buffer plus an upload, the path every effect's parameters take.
     BufferHandle uniforms = device->create_uniform_buffer(256, "test uniforms");
     check(uniforms != nullptr, "a uniform buffer allocates");
     if (uniforms != nullptr) {
@@ -75,10 +71,8 @@ int main() {
         device->wait_idle();
     }
 
-    // Every blend preset has to actually build. Min and Max are the ones worth checking:
-    // WebGPU ignores the src and dst factors for those operations but still validates
-    // them, and a rejected pipeline would show up as a layer that silently draws in the
-    // wrong mode rather than as an error anyone notices.
+    // Every blend preset must build; a rejected pipeline shows up as silent wrong-mode
+    // drawing, not an error.
     {
         constexpr const char* kShader = R"(
 @vertex fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {
@@ -104,12 +98,8 @@ int main() {
         }
     }
 
-    // Every effect in the library has to compile on the real adapter.
-    //
-    // A shader that fails to compile gives a null pipeline, and the compositor skips a
-    // null pipeline, so the effect silently does nothing: it appears in the menu, it
-    // appears in the stack, its parameters scrub, and the picture never changes. That is
-    // the worst failure mode available to an effect and it produces no error anywhere.
+    // A shader that fails to compile yields a null pipeline the compositor silently
+    // skips — the effect appears fully functional but never changes the picture.
     for (const ruby::engine::EffectDef& def : ruby::engine::EffectRegistry::instance().all()) {
         const RenderPipelineHandle pipeline = device->create_render_pipeline(
             def.shader, "vs", "fs", TextureFormat::RGBA16Float, def.schema.id);

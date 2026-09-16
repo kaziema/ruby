@@ -7,11 +7,8 @@
 
 namespace ruby::media {
 
-// One decoded frame, converted to tightly packed RGBA8.
-//
-// RGBA rather than the source's native YUV because everything downstream wants a
-// texture. Converting on the GPU would be faster and is worth doing later; correctness
-// first, and the seam for that change is inside this class.
+// One decoded frame, converted to tightly packed RGBA8 (downstream wants a texture,
+// not source YUV). CPU conversion for now; GPU would be faster, later.
 struct VideoFrame {
     int width = 0;
     int height = 0;
@@ -25,10 +22,8 @@ struct VideoFrame {
 
 // Decodes video frames at arbitrary times.
 //
-// Seeking is deliberately naive for now: jump to the keyframe at or before the target
-// and decode forward. That is correct but slow to scrub on long-GOP footage, which is
-// the classic hell of every editor and deserves its own pass with a real keyframe index.
-// Getting pixels on screen comes first.
+// Seeking is naive: jumps to the keyframe at/before target and decodes forward. Correct
+// but slow to scrub on long-GOP footage; wants a real keyframe index eventually.
 class VideoDecoder {
 public:
     ~VideoDecoder();

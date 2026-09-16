@@ -12,8 +12,8 @@ namespace {
 using json = nlohmann::json;
 using ruby::core::MediaKind;
 
-// Names, not integers, for the same reason the project format uses them: an integer that
-// shifts meaning between versions silently reinterprets every older file.
+// Names, not integers, as in the project format: avoids reinterpreting old files if
+// values shift.
 const char* name(MediaKind k) {
     switch (k) {
         case MediaKind::Video: return "video";
@@ -44,8 +44,7 @@ bool MediaPool::add(const PooledItem& item) {
                                      return existing.path == item.path;
                                  });
     if (at != items_.end()) {
-        // Already pooled. The first-seen time is the point of the entry, so an
-        // re-import must not overwrite it with today's date.
+        // Already pooled; re-import must not overwrite firstSeen.
         return false;
     }
     items_.push_back(item);
@@ -108,9 +107,8 @@ bool MediaPool::save(const std::string& file) const {
     }
     doc["items"] = std::move(entries);
 
-    // Temp file then rename, as the project format does. A pool half-written because the
-    // app was quit mid-save is worse than no pool: it reads as corrupt and you lose the
-    // lot, including entries from months ago that nothing else remembers.
+    // Temp file then rename, as the project format does, so a mid-save quit can't
+    // corrupt the whole pool.
     const std::string temp = file + ".tmp";
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);

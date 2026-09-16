@@ -1,8 +1,5 @@
-// Tests for moving tabs between panel frames.
-//
-// The interesting cases are the ones with off-by-one errors hiding in them: reordering
-// inside one frame, and dropping past the end. Both are removal-then-insertion, and the
-// index means something different on either side of the removal.
+// Panel frame tab-moving tests. Watch for off-by-one errors in reordering and end-of-list
+// drops, since both are removal-then-insertion with the index shifting mid-operation.
 
 #include <QApplication>
 #include <QLabel>
@@ -63,8 +60,7 @@ void a_tab_moves_between_frames() {
     delete b;
 }
 
-// The page has to travel with the tab, or the tab arrives showing whatever page happened
-// to be at that index in the new frame.
+// The page must travel with the tab, not whatever page sits at that index in the new frame.
 void the_page_travels_with_the_tab() {
     ui::PanelFrame* a = makeFrame({QStringLiteral("One"), QStringLiteral("Two")});
     ui::PanelFrame* b = makeFrame({QStringLiteral("Other")});
@@ -88,8 +84,7 @@ void a_frame_can_be_emptied() {
     check(moved.page != nullptr, "the last tab comes out");
     check(a->tabCount() == 0, "leaving the frame empty rather than refusing");
 
-    // Emptying must not leave the frame pointing at a tab that is not there, which is the
-    // shape of every "index out of range" crash in a widget like this.
+    // Must not leave currentIndex pointing past the end.
     check(a->currentIndex() == 0, "and its current index is not past the end");
 
     delete moved.page;
@@ -106,8 +101,7 @@ void out_of_range_is_refused_rather_than_crashing() {
     a->insertTab(0, QStringLiteral("Null"), nullptr);
     check(a->tabCount() == 1, "inserting a null page does nothing");
 
-    // Clamped rather than refused: a drop past the end means "at the end", which is what
-    // dropping on empty strip space should do.
+    // A drop past the end clamps to the end (dropping on empty strip space).
     a->insertTab(99, QStringLiteral("Far"), new QLabel(QStringLiteral("Far")));
     checkLabels(*a, {QStringLiteral("One"), QStringLiteral("Far")},
                 "an index past the end clamps to the end");
@@ -124,10 +118,7 @@ void a_frame_can_refuse_to_give_tabs_up() {
     delete a;
 }
 
-// A tab's home is no longer fixed, so anything that renames one has to find it first.
-// The viewer's composition tab used to be rewritten by replacing all three viewer labels,
-// which put a label back for a tab that had been dragged elsewhere: the tab then existed
-// in two panels and one of them had no page.
+// Renaming a tab must find its current frame, not assume a fixed home.
 void a_tab_can_be_found_and_renamed_wherever_it_lives() {
     ui::PanelFrame* a = makeFrame({QStringLiteral("Comp"), QStringLiteral("Footage")});
     ui::PanelFrame* b = makeFrame({QStringLiteral("Inspector")});
@@ -135,7 +126,6 @@ void a_tab_can_be_found_and_renamed_wherever_it_lives() {
     QWidget* compPage = nullptr;
     {
         int index = -1;
-        // The page belonging to tab 0 of a, found the way production code finds it.
         const ui::PanelFrame::DetachedTab peek = a->takeTab(0);
         compPage = peek.page;
         a->insertTab(0, peek.label, peek.page);
@@ -172,18 +162,13 @@ void a_destroyed_frame_leaves_nothing_behind() {
         page = taken.page;
         delete gone;
     }
-    // The registry must not still be offering a frame that has been destroyed, which is
-    // the crash the id lookup exists to prevent.
+    // A destroyed frame must not still be findable by the registry.
     check(ui::PanelFrame::frameHolding(page) == nullptr,
           "a page nobody holds is held by nobody");
     delete page;
 }
 
-// Tabs share the strip out when they stop fitting.
-//
-// They used to keep their natural width whatever happened, so a tab dragged into a panel
-// that was already full got painted past the right edge: still in the stack, still in the
-// label list, invisible and unclickable. Kaz lost the Align tab this way.
+// Tabs share the strip width out when they stop fitting, rather than running off the edge.
 void tabs_that_do_not_fit_share_the_strip_out() {
     ui::PanelFrame* frame = makeFrame({QStringLiteral("Project"),
                                        QStringLiteral("Pooled Media"),
@@ -212,8 +197,7 @@ void tabs_that_do_not_fit_share_the_strip_out() {
     delete frame;
 }
 
-// The other half: when they do fit, they keep their natural width rather than being
-// stretched to fill. A two-tab panel should not have two half-panel-wide tabs.
+// Tabs that fit keep their natural width instead of stretching to fill.
 void tabs_that_fit_keep_their_own_width() {
     ui::PanelFrame* frame = makeFrame({QStringLiteral("A"), QStringLiteral("B")});
     frame->resize(600, 300);

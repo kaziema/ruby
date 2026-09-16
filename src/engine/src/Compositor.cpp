@@ -10,8 +10,8 @@
 namespace ruby::engine {
 namespace {
 
-// Engine-internal pass, so WGSL rather than Slang (see GpuDevice.h). Vertices are
-// generated from the vertex index; there is nothing to bind but the uniforms.
+// Engine-internal pass: WGSL, not Slang (see GpuDevice.h). Vertices come from the
+// vertex index; only uniforms are bound.
 constexpr const char* kQuadShader = R"(
 struct Uniforms {
     transform : mat4x4<f32>,
@@ -39,20 +39,16 @@ fn vs(@builtin(vertex_index) index : u32) -> VsOut {
 
 @fragment
 fn fs(in : VsOut) -> @location(0) vec4<f32> {
-    // Layers without media sample a 1x1 white texture, so one pipeline covers both
-    // cases instead of two that have to be kept in step.
+    // Layers without media sample a 1x1 white texture, so one pipeline covers both cases.
     let c = textureSample(tex, samp, in.uv) * u.color;
 
-    // PREMULTIPLIED output. Every blend mode's factors are written assuming this, and
-    // for Normal it lands on exactly the same result as the straight-alpha blending this
-    // replaced. Without it, Add and Screen blow out wherever a layer is semi-transparent,
-    // because the hardware would add the full colour regardless of coverage.
+    // Premultiplied output: blend modes assume it, and Add/Screen would blow out on
+    // semi-transparent layers otherwise.
     return vec4<f32>(c.rgb * c.a, c.a);
 }
 )";
 
-// The uniform block is 80 bytes but WebGPU wants uniform bindings aligned; 256 is the
-// conservative floor across backends.
+// Uniform block is 80 bytes; 256 is the safe alignment floor across backends.
 constexpr std::size_t kUniformStride = 256;
 
 struct Rgb {
@@ -66,8 +62,7 @@ struct EffectUniforms {
     float params[8][4];
 };
 
-// Layer label colours, converted from the UI's sRGB hexes to linear light. Compositing
-// happens in linear, and the surface is sRGB, so the hardware re-encodes on write.
+// UI's sRGB label hexes converted to linear, since compositing happens in linear light.
 float toLinear(float srgb) noexcept {
     return srgb <= 0.04045f ? srgb / 12.92f
                             : std::pow((srgb + 0.055f) / 1.055f, 2.4f);
@@ -119,7 +114,7 @@ Compositor::Content Compositor::contentFor(const std::string& path, double secon
     }
     Source& source = it->second;
     if (source.decoder == nullptr) {
-        return {};  // unopenable file; the layer stays flat rather than vanishing
+        return {};  // unopenable file; layer stays flat rather than vanishing
     }
 
     const Content sized{source.texture, source.decoder->width(),
@@ -134,7 +129,7 @@ Compositor::Content Compositor::contentFor(const std::string& path, double secon
         gpu::TextureDesc desc;
         desc.width = static_cast<std::uint32_t>(frame->width);
         desc.height = static_cast<std::uint32_t>(frame->height);
-        // sRGB so sampling converts to linear for us; the working space is linear light.
+        // sRGB format converts to linear on sample, matching the linear working space.
         desc.format = gpu::TextureFormat::RGBA8UnormSrgb;
         desc.usage = gpu::TextureUsage::Sampled | gpu::TextureUsage::CopyDst;
         desc.debug_label = "video frame";
@@ -142,8 +137,8 @@ Compositor::Content Compositor::contentFor(const std::string& path, double secon
         source.uploadedTime = -1.0;
     }
 
-    // Re-uploading an unchanged frame is 8MB of pointless traffic per repaint, and the
-    // viewer repaints for reasons that have nothing to do with time.
+    // Skip re-upload when the frame hasn't changed; the viewer repaints for reasons
+    // unrelated to time.
     if (source.uploadedTime != frame->pts) {
         device_.write_texture(source.texture, frame->rgba.data(), frame->rgba.size(),
                               static_cast<std::uint32_t>(frame->width) * 4);
@@ -164,9 +159,8 @@ gpu::RenderPipelineHandle Compositor::quadPipelineFor(core::BlendMode mode) {
         return it->second;
     }
 
-    // The four that need to read the destination cannot be a blend equation at all, so
-    // they fall back to Normal rather than silently rendering as something they are not.
-    // Better a layer that looks unblended than one that looks blended wrongly.
+    // Modes needing to read the destination aren't expressible as a blend equation;
+    // fall back to Normal rather than render them wrong.
     gpu::BlendPreset preset{};
     const char* label = "composite quads";
     switch (mode) {
@@ -198,8 +192,8 @@ gpu::RenderPipelineHandle Compositor::pipelineFor(const EffectDef& def) {
     if (it != effectPipelines_.end()) {
         return it->second;
     }
-    // Effects render into the linear working format, not the display format, so their
-    // output stays in linear light for the next effect in the chain.
+    // Renders to the linear working format, not the display format, so it stays linear
+    // for the next effect in the chain.
     gpu::RenderPipelineHandle pipeline = device_.create_render_pipeline(
         def.shader, "vs", "fs", gpu::TextureFormat::RGBA16Float, def.schema.id);
     effectPipelines_.emplace(def.schema.id, pipeline);
@@ -216,8 +210,8 @@ Compositor::Workspace& Compositor::workspaceFor(core::LayerId layer, std::uint32
     gpu::TextureDesc desc;
     desc.width = width;
     desc.height = height;
-    // RGBA16Float, not 8-bit: effects stack, and 8 bits per channel bands visibly after
-    // two or three passes. Headroom above 1.0 also matters for glows later.
+    // RGBA16Float: 8-bit bands visibly after a few stacked passes, and glow needs
+    // headroom above 1.0.
     desc.format = gpu::TextureFormat::RGBA16Float;
     desc.usage = gpu::TextureUsage::Sampled | gpu::TextureUsage::RenderTo;
     desc.debug_label = "effect workspace";
@@ -235,14 +229,11 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
                                             double seconds, const core::TimeContext& ctx,
                                             std::size_t& slot, NodeHash outputHash) {
     if (source == nullptr || layer.effects.empty()) {
-        // A layer with no effects has nothing worth caching: its output IS its source, the
-        // decoder already holds that texture, and storing a second reference to it would
-        // spend the budget on the one thing that was already free.
+        // Nothing to cache: output IS the source, already held by the decoder.
         return source;
     }
 
-    // Everything that will actually draw, decided before anything does, so the last pass
-    // is known and can be sent somewhere the cache can keep.
+    // Resolve passes up front so the last one is known and can target a keepable texture.
     struct Pass {
         const core::EffectInstance* effect;
         const EffectDef* def;
@@ -267,8 +258,7 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
         return source;
     }
 
-    // The cheapest render is the one that never starts. Asked before a texture is touched
-    // and before a single pass is recorded.
+    // Cache check happens before any texture work starts.
     if (outputHash != 0) {
         if (gpu::TextureHandle hit = cache_.find(outputHash); hit != nullptr) {
             return hit;
@@ -280,10 +270,8 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
         return source;
     }
 
-    // The last pass draws into a texture of its own rather than into the ping-pong pair,
-    // because the pair is reused by this layer on the very next frame. A cached handle
-    // pointing at a workspace would be overwritten and the cache would start serving the
-    // wrong picture, confidently.
+    // Last pass draws into its own texture, not the ping-pong pair: the pair gets reused
+    // next frame, so a cached handle into it would silently go stale.
     gpu::TextureHandle keep = outputHash != 0
                                   ? createOutputTexture(source->width(), source->height())
                                   : nullptr;
@@ -297,8 +285,7 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
         const EffectDef* def = passes[pass].def;
         const gpu::RenderPipelineHandle pipeline = passes[pass].pipeline;
 
-        // Parameters go into the uniform block in schema order, one vec4 each, so the
-        // shader indexes them positionally and nothing here is effect-specific.
+        // Params go into the uniform block in schema order; shader indexes positionally.
         EffectUniforms u{};
         for (std::size_t i = 0;
              i < def->schema.params.size() &&
@@ -334,8 +321,7 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
         return source;
     }
     if (keep != nullptr && input == keep) {
-        // RGBA16Float: eight bytes a pixel. Counted honestly, because a budget measured in
-        // entries would let eight 1080x1920 textures quietly become a gigabyte.
+        // RGBA16Float: 8 bytes/pixel.
         const std::size_t bytes = static_cast<std::size_t>(source->width()) *
                                   static_cast<std::size_t>(source->height()) * 8;
         cache_.put(outputHash, input, bytes);
@@ -368,10 +354,7 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         return;
     }
 
-    // Fit the composition inside the target, preserving its aspect. Through the shared
-    // helper, because the viewport has to turn a mouse position into a composition
-    // position and a click two pixels from where the picture was drawn is a click on the
-    // wrong layer.
+    // Fit composition into target, preserving aspect; shared helper so hit-testing agrees.
     const auto compW = static_cast<float>(comp.width);
     const auto compH = static_cast<float>(comp.height);
     const FrameFit fit_ =
@@ -384,26 +367,16 @@ void Compositor::render(const core::Project& project, const core::Composition& c
 
     const core::TimeContext ctx = comp.timeContext();
 
-    // What this frame is made of, worked out before any of it is drawn. Pure, cheap, and
-    // the only thing that can answer "have we already got this".
     const RenderGraph graph = buildGraph(project, comp, seconds, externalKeys);
 
-    // Everything below renders at the FRAME's time, not at wherever the playhead happens
-    // to sit inside it.
-    //
-    // The graph quantises time so that two scrubs landing on the same frame produce the
-    // same hash. If the render did not quantise with it, a cache hit would hand back a
-    // texture drawn at 1.0033s while claiming to be frame 30, and a scrub across one frame
-    // would show whichever sub-frame position happened to render first. A cache that is
-    // confidently wrong is worse than no cache, and this is the line that decides which
-    // one this is.
+    // Snap to the graph's quantized frame time: without this, a cache hit could return a
+    // texture rendered at a different sub-frame position than the graph's hash claims.
     const double frameFps = comp.fps > 0.0 ? comp.fps : 30.0;
     seconds = static_cast<double>(graph.frame) / frameFps;
 
     auto commands = device_.begin_commands("composite");
 
-    // Effect passes run first, into their own targets. Render passes cannot nest, so a
-    // layer's stack has to be finished before the pass that draws the frame opens.
+    // Effect passes run first, into their own targets: render passes can't nest.
     std::size_t slot = 0;
     struct Prepared {
         const core::Layer* layer;
@@ -414,9 +387,7 @@ void Compositor::render(const core::Project& project, const core::Composition& c
     std::vector<Prepared> prepared;
     prepared.reserve(comp.layers.size());
 
-    // Solo is a whole-composition question, so it has to be answered before any single
-    // layer can be judged: one soloed layer changes what every other layer does. Asking
-    // per layer would need this same scan each time.
+    // Solo is whole-composition, so resolve it once up front.
     bool anySolo = false;
     for (const core::Layer& layer : comp.layers) {
         if (layer.solo && layer.kind != core::LayerKind::Audio) {
@@ -429,15 +400,11 @@ void Compositor::render(const core::Project& project, const core::Composition& c
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         const core::Layer& layer = *it;
 
-        // With anything soloed, only soloed layers are candidates. The eye still applies
-        // to those, below: solo narrows the set, visibility decides within it. Two
-        // independent switches, which is easier to predict than one overriding the other.
+        // Solo narrows the candidate set; the eye toggle still applies within it.
         if (anySolo && !layer.solo) {
             continue;
         }
-        // Nulls are never drawn. A null exists to be parented to: it is a transform with
-        // a handle, and rendering it would put a coloured rectangle in the middle of
-        // every shot that used one.
+        // Nulls exist only to be parented to; never drawn.
         if (!layer.enabled || layer.kind == core::LayerKind::Audio ||
             layer.kind == core::LayerKind::Null) {
             continue;
@@ -452,9 +419,8 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         if (const std::string path = project.pathFor(layer); !path.empty()) {
             content = contentFor(path, seconds - in);
         } else if (external != nullptr) {
-            // Supplied content, currently only text. Indistinguishable from footage from
-            // here on: it is a texture with a size, and every sizing, effect and blend
-            // path treats it the same way.
+            // Supplied content (currently text only); treated identically to footage
+            // from here on since it's just a texture with a size.
             if (const auto supplied = external->find(layer.id);
                 supplied != external->end()) {
                 content.texture = supplied->second.texture;
@@ -462,9 +428,7 @@ void Compositor::render(const core::Project& project, const core::Composition& c
                 content.height = supplied->second.height;
             }
         }
-        // The hash of this layer's finished output, from the graph. Zero when the graph
-        // does not have a node for it, which means "render it and do not cache it" rather
-        // than a guessed key.
+        // Zero means no graph node for this layer: render but don't cache.
         NodeHash outputHash = 0;
         if (const int node = graph.outputFor(layer.id); node >= 0) {
             outputHash = graph.nodes[static_cast<std::size_t>(node)].hash;
@@ -474,13 +438,11 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         prepared.push_back({&layer, std::move(texture), content, in});
     }
 
-    // Outside the frame is near-black so the letterbox reads as "not your picture".
+    // Near-black outside the frame so the letterbox reads as "not your picture".
     commands->begin_pass(target, 0.008f, 0.008f, 0.008f, 1.0f);
 
-    // Everything from here on is clipped to the composition frame. A layer that animates
-    // off the edge has to actually leave the picture; without this it keeps drawing over
-    // the letterbox and the frame boundary means nothing. The clear above is unaffected,
-    // since it applies to the whole attachment rather than the scissor.
+    // Clip to the composition frame from here on, so layers animating off-edge actually
+    // leave the picture. Clear above is unaffected (applies to the whole attachment).
     const auto clampToTarget = [](float value, float limit) {
         return static_cast<std::uint32_t>(std::clamp(value, 0.0f, limit));
     };
@@ -488,15 +450,13 @@ void Compositor::render(const core::Project& project, const core::Composition& c
                           clampToTarget(frameW, viewW - frameX),
                           clampToTarget(frameH, viewH - frameY));
 
-    // Draw the frame itself, so an empty composition still shows where it is.
-    // Takes a transform from the unit quad straight to screen pixels, rather than a
-    // rectangle. A rectangle cannot express rotation, which is why Rotation and Anchor
-    // Point sat in the inspector doing nothing until now.
+    // Takes a transform from the unit quad to screen pixels directly (not a rectangle),
+    // since a rectangle can't express rotation.
     const auto pushQuad = [&](const core::Transform2D& unitToScreen, Rgb color, float alpha,
                               const gpu::TextureHandle& texture,
                               const gpu::RenderPipelineHandle& pipeline) {
-        // Screen pixels -> normalised device coordinates, folded into the same matrix.
-        // Y flips because NDC is up-positive and our layout is top-down.
+        // Screen pixels -> NDC, folded into the same matrix. Y flips: NDC is up-positive,
+        // our layout is top-down.
         const double ndcX = 2.0 / static_cast<double>(viewW);
         const double ndcY = -2.0 / static_cast<double>(viewH);
 
@@ -520,30 +480,24 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         commands->draw(pipeline, buffer, texture != nullptr ? texture : white_, 6);
     };
 
-    // How big a layer is in COMPOSITION units, before scale.
-    //
-    // Everything here used to be computed in screen pixels, which quietly baked the frame
-    // fit into the layer's size. Keeping it in composition units means the transform can
-    // do the placing and the screen conversion happens exactly once, at the end.
+    // Layer size in composition units, before scale — kept out of screen pixels so the
+    // frame-fit conversion happens exactly once, at the end.
     const auto sizeOf = [&](const core::Layer& layer,
                             const Content& content) -> core::LayerSize {
         if (content.width > 0 && content.height > 0) {
-            // A layer is the size of its source, not the size of the frame. A 1920x1080
-            // clip in a 1080x1920 composition comes in wider than the frame and gets
-            // cropped at the sides; squashing it to fit would distort the picture and make
-            // every framing decision on top of it wrong.
+            // Layer is sized to its source, not the frame — squashing to fit would
+            // distort the picture.
             return {static_cast<double>(content.width),
                     static_cast<double>(content.height)};
         }
         switch (layer.kind) {
             case core::LayerKind::Footage:
             case core::LayerKind::Precomp:
-                // No source resolved. A precomp is comp-sized by definition, and
-                // unresolved footage has no better guess available.
+                // No source resolved: precomp is comp-sized by definition; footage has
+                // no better guess.
                 return {static_cast<double>(compW), static_cast<double>(compH)};
             case core::LayerKind::Solid:
-                // Zero means "match the composition", so a solid follows a comp that gets
-                // resized rather than staying frozen at whatever it was created at.
+                // 0 means "match the composition" so a solid follows comp resizes.
                 return {layer.solidWidth > 0 ? static_cast<double>(layer.solidWidth)
                                              : static_cast<double>(compW),
                         layer.solidHeight > 0 ? static_cast<double>(layer.solidHeight)
@@ -553,16 +507,13 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         }
     };
 
-    // The same thing as a plain SizeOf, for parents up the chain. A parent has no Content
-    // here: it may not even be drawn this frame, and a null never is. Its size still
-    // matters, because its anchor is measured against it.
+    // Same as sizeOf, for parents up the chain (which may have no Content this frame).
     const core::SizeOf sizeOf2 = [&](const core::Layer& layer) {
         const Content none;
         return sizeOf(layer, none);
     };
 
-    // A plain rectangle expressed as a transform: scale the unit quad to the frame, then
-    // move it there.
+    // Rectangle as a transform: scale unit quad, then translate.
     const auto rectToScreen = [](double x, double y, double w, double h) {
         return core::Transform2D::scale(w, h).then(core::Transform2D::translate(x, y));
     };
@@ -574,21 +525,18 @@ void Compositor::render(const core::Project& project, const core::Composition& c
         const core::Layer& layer = *item.layer;
         const Content& content = item.content;
 
-        // Through core::evaluate, like every other transform property. Reading it with
-        // Property::evaluate meant an expression on Opacity was silently ignored while the
-        // identical expression on Position worked, which is the worst kind of
-        // inconsistency: it looks like the expression is wrong.
+        // core::evaluate, not Property::evaluate, so expressions on Opacity work like
+        // they do on every other property.
         const core::Property* opacity = layer.find("opacity");
         const double alphaPct =
             opacity != nullptr ? core::evaluate(layer, *opacity, seconds, ctx).c[0] : 100.0;
         const auto alpha = static_cast<float>(std::isfinite(alphaPct) ? alphaPct : 100.0);
 
-        // Media fills the quad; without it the label colour stands in.
+        // Media fills the quad; without it, the label color stands in.
         Rgb tint = (content.texture != nullptr) ? Rgb{1.0f, 1.0f, 1.0f}
                                                : colorFor(layer.label);
 
-        // A solid is its own colour, not its label colour. The label is organisational;
-        // the colour is the picture.
+        // A solid uses its own color, not its label color.
         if (layer.kind == core::LayerKind::Solid) {
             tint = Rgb{static_cast<float>(layer.solidColor.c[0]),
                        static_cast<float>(layer.solidColor.c[1]),
@@ -597,21 +545,18 @@ void Compositor::render(const core::Project& project, const core::Composition& c
 
         const core::LayerSize size = sizeOf(layer, content);
 
-        // Unit quad -> the layer's own space, centred. Centred because the anchor point is
-        // measured from the middle of the layer, so an untouched layer pivots about
-        // itself.
+        // Unit quad -> layer space, centered on the anchor point.
         const core::Transform2D unitToLayer =
             core::Transform2D::translate(-0.5, -0.5)
                 .then(core::Transform2D::scale(size.width, size.height));
 
-        // Layer space -> composition space, including scale, rotation, anchor and every
-        // parent up the chain.
+        // Layer space -> composition space: scale, rotation, anchor, parent chain.
         const core::Transform2D layerToComp =
             core::resolvedTransform(comp, layer, seconds, ctx, static_cast<double>(compW),
                                     static_cast<double>(compH), sizeOf2);
 
-        // Composition space -> screen pixels. One uniform factor, because the frame fit is
-        // uniform: a composition pixel is the same size horizontally and vertically.
+        // Composition space -> screen pixels; one uniform factor since the frame fit
+        // is uniform.
         const float pxPerUnit = frameW / compW;
         const core::Transform2D compToScreen =
             core::Transform2D::scale(static_cast<double>(pxPerUnit),
@@ -619,18 +564,13 @@ void Compositor::render(const core::Project& project, const core::Composition& c
                 .then(core::Transform2D::translate(static_cast<double>(frameX),
                                                    static_cast<double>(frameY)));
 
-        // item.texture is the effect stack's output, or the raw source when the layer
-        // has no effects.
         pushQuad(unitToLayer.then(layerToComp).then(compToScreen), tint,
                  std::clamp(alpha / 100.0f, 0.0f, 1.0f), item.texture,
                  quadPipelineFor(layer.blend));
     }
 
-    // Handles and guides, last and on top of everything.
-    //
-    // The scissor is deliberately widened to the whole target first. A layer dragged half
-    // out of frame still has handles, and clipping them to the frame would hide the corner
-    // you are reaching for exactly when you most need it.
+    // Handles and guides on top of everything; scissor widened to the whole target so
+    // handles on a layer dragged out of frame stay visible.
     if (overlay != nullptr && !overlay->empty()) {
         commands->set_scissor(0, 0, static_cast<std::uint32_t>(viewW),
                               static_cast<std::uint32_t>(viewH));

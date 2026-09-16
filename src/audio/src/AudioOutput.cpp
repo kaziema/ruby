@@ -67,8 +67,7 @@ std::unique_ptr<AudioOutput> AudioOutput::create() {
 void AudioOutput::setSources(const std::vector<AudioSource>& sources) {
     const int count = std::min(static_cast<int>(sources.size()), kMaxSources);
 
-    // Odd sequence means "being written". A reader that sees an odd number, or a number
-    // that moved while it was copying, keeps what it already had for this callback.
+    // Odd seq = write in progress; a reader catching that keeps its last snapshot.
     seq_.fetch_add(1, std::memory_order_release);
     std::atomic_thread_fence(std::memory_order_release);
 
@@ -105,8 +104,7 @@ double AudioOutput::position() const noexcept {
 }
 
 void AudioOutput::mix(float* out, std::uint32_t frames) {
-    // Refresh the private copy only if the list actually changed. Reading a stable list
-    // costs one atomic load per callback.
+    // Re-copy only if the seqlock shows a completed write since the last snapshot.
     const std::uint32_t before = seq_.load(std::memory_order_acquire);
     if (before != snapshotSeq_ && (before % 2) == 0) {
         AudioSource candidate[kMaxSources];
@@ -116,24 +114,16 @@ void AudioOutput::mix(float* out, std::uint32_t frames) {
         }
         std::atomic_thread_fence(std::memory_order_acquire);
         if (seq_.load(std::memory_order_acquire) == before) {
-            // The write finished before we started and did not start again while we
-            // copied, so this snapshot is whole.
+            // Seq unchanged during the copy, so it's a whole snapshot.
             for (int i = 0; i < count && i < kMaxSources; ++i) {
                 snapshot_[i] = candidate[i];
             }
             snapshotCount_ = std::min(count, kMaxSources);
             snapshotSeq_ = before;
         }
-        // Otherwise keep the previous snapshot. One callback of staleness is inaudible;
-        // half a source list is not.
     }
 
-    // The cursor advances whether or not there is anything to mix, because this device is
-    // the transport's clock and silence is still time passing.
-    //
-    // Returning early here froze it: delete the only audio layer and the source list goes
-    // empty, so position() stopped moving, so the transport it drives stopped moving, and
-    // the spacebar did nothing. A composition with no audio at all had the same problem.
+    // Cursor always advances, even with nothing to mix — it's the transport's clock.
     const std::uint64_t start = cursor_.load();
     cursor_.store(start + frames);
 
@@ -152,9 +142,8 @@ void AudioOutput::mix(float* out, std::uint32_t frames) {
                 t >= source.endSeconds) {
                 continue;
             }
-            // Index through the source's own rate rather than the device's, so a buffer
-            // that was decoded at a different rate plays at the right pitch instead of
-            // being transposed.
+            // Index at the source's own sample rate so a buffer decoded at a different
+            // rate isn't transposed.
             const double into = t - source.startSeconds + source.sourceOffset;
             const auto frame =
                 static_cast<std::uint64_t>(into * source.buffer->sampleRate);
@@ -170,16 +159,12 @@ void AudioOutput::mix(float* out, std::uint32_t frames) {
             right += r * source.gain;
         }
 
-        // Summing layers can exceed full scale. Clamping is not mixing, but a hard clip
-        // is far better than the wrap-around fuzz you get from letting it overflow, and
-        // it is honest: it sounds like something is too loud, because it is.
+        // Hard clip beats wrap-around fuzz from overflow.
         out[i * 2] = std::clamp(left, -1.0f, 1.0f);
         out[i * 2 + 1] = std::clamp(right, -1.0f, 1.0f);
     }
 
-    // Runs on past the last source rather than stopping. With several layers there can be
-    // silence between them, and stopping at the first gap would end playback in the
-    // middle of a composition. The transport decides when playing is over.
+    // Doesn't stop at gaps between sources — the transport decides when playback ends.
 }
 
 }  // namespace ruby::audio

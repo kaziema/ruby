@@ -10,10 +10,7 @@
 namespace ruby::audio {
 
 // One audible layer: a decoded buffer placed on the composition's timeline.
-//
-// Times are in COMPOSITION seconds, not buffer seconds. The mixer walks the timeline and
-// asks each source what it has at that moment, which is the only model that survives
-// layers that start at different times, are trimmed, and overlap.
+// All times are COMPOSITION seconds, not buffer seconds.
 struct AudioSource {
     const media::AudioBuffer* buffer = nullptr;
 
@@ -23,13 +20,8 @@ struct AudioSource {
     float gain = 1.0f;
 };
 
-// Plays a mix of decoded buffers and reports where the device actually is.
-//
-// That last part is the whole point. An audio card runs on its own crystal, not the
-// system clock, and the two are never exactly the same rate. If video keeps following
-// wall clock while audio follows the card, they drift apart: slowly, but a few frames a
-// minute is enough to ruin an edit cut to syllables. So once audio is playing, the
-// device becomes the clock and everything else follows it.
+// Plays a mix of decoded buffers and reports where the device actually is, so video can
+// follow the audio clock instead of the wall clock (they drift otherwise).
 class AudioOutput {
 public:
     ~AudioOutput();
@@ -40,11 +32,8 @@ public:
     // Null when no audio device could be opened. A legal state: the app runs silently.
     [[nodiscard]] static std::unique_ptr<AudioOutput> create();
 
-    // Buffers are borrowed, not owned, and must outlive this object.
-    //
-    // Safe to call while playing. The list is published to the audio thread through a
-    // seqlock rather than by stopping the device: stopping on every timeline edit would
-    // mean a dropout every time you nudged a layer, which is worse than the problem.
+    // Buffers are borrowed and must outlive this object. Safe to call while playing —
+    // published to the audio thread via seqlock, not by stopping the device.
     void setSources(const std::vector<AudioSource>& sources);
 
     // Convenience for the single-clip case: one source starting at zero, running its own
@@ -57,20 +46,13 @@ public:
     [[nodiscard]] bool playing() const noexcept { return playing_.load(); }
 
     // Position in COMPOSITION seconds, read from the device's own progress.
-    //
-    // This used to be an offset into one buffer. It is now timeline time, because with
-    // several sources at different offsets there is no single buffer to be an offset into.
     [[nodiscard]] double position() const noexcept;
 
-    // Called from the audio thread only.
-    //
-    // Writes only the samples it actually has, so `out` must already be zeroed: with no
-    // sources it writes nothing at all. It always advances the clock, though, because
-    // this device is what the transport follows and silence is still time passing.
+    // Audio thread only. `out` must be pre-zeroed; only samples that exist get written.
+    // Always advances the clock, even with nothing to mix.
     void mix(float* out, std::uint32_t frames);
 
-    // More layers than anyone mixes by hand in a short-form edit, and a fixed ceiling is
-    // what lets the source list live inline and be copied without allocating.
+    // Fixed ceiling so the source list lives inline and copies without allocating.
     static constexpr int kMaxSources = 32;
 
 private:
@@ -80,16 +62,9 @@ private:
 
     std::unique_ptr<Impl> impl_;
 
-    // --- seqlock -------------------------------------------------------------
-    //
-    // The UI thread writes sources; the audio thread reads them. A mutex is out: blocking
-    // in a real-time callback is how you get dropouts. So the writer brackets its edit
-    // with an odd sequence number, and the reader takes a copy and checks the number did
-    // not move underneath it. The reader never waits and never allocates; it just keeps
-    // last known good if it caught a write in progress.
-    //
-    // This is why kMaxSources exists. Copying a fixed inline array is what makes the
-    // reader's snapshot allocation-free.
+    // Seqlock: UI thread writes, audio thread reads, no mutex (would risk dropouts in
+    // the real-time callback). Writer brackets edits with an odd seq number; reader
+    // copies and checks it didn't move, keeping the last good snapshot otherwise.
     std::atomic<std::uint32_t> seq_{0};
     AudioSource sources_[kMaxSources]{};
     int sourceCount_ = 0;

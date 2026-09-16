@@ -10,12 +10,8 @@ class QTimer;
 
 namespace ruby::ui {
 
-// Drives the transport from Qt's event loop.
-//
-// The timer fires faster than the frame rate on purpose. Qt timers are not precise, so
-// a timer set to exactly one frame lands late most of the time and playback drifts slow.
-// Ticking often and asking the transport how much real time passed decouples "how often
-// we wake up" from "how fast the composition plays".
+// Drives the transport from Qt's event loop. Ticks faster than the frame rate since
+// Qt timers aren't precise enough to hit exact frame boundaries.
 class Playback : public QObject {
     Q_OBJECT
 
@@ -24,8 +20,7 @@ public:
 
     void configure(double duration, double frameRate);
 
-    // Once a track is attached, the audio device becomes the clock. Passing null goes
-    // back to the wall clock, which is the correct behaviour for a silent project.
+    // Attaching audio makes the device the clock; null falls back to the wall clock.
     void setAudio(audio::AudioOutput* output);
 
     [[nodiscard]] bool playing() const noexcept { return transport_.playing(); }

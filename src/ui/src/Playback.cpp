@@ -15,8 +15,7 @@ void Playback::configure(double duration, double frameRate) {
     transport_.setDuration(duration);
     transport_.setFrameRate(frameRate);
 
-    // Wake up about four times per frame. Enough to land close to each boundary without
-    // spinning the CPU, and the transport corrects for whatever the real interval was.
+    // Wake ~4x per frame; the transport corrects for whatever the real interval was.
     const double frameMs = 1000.0 / transport_.frameRate();
     timer_->setInterval(std::max(1, static_cast<int>(frameMs / 4.0)));
 }
@@ -62,16 +61,12 @@ void Playback::tick() {
     const qint64 nowNs = clock_.nsecsElapsed();
     const int before = transport_.frame();
 
-    // With audio playing, the device is the clock. An audio card runs on its own
-    // crystal and will not match the system clock exactly; following wall clock here
-    // would let picture and sound drift apart over a long take, which is fatal in an
-    // app whose whole premise is landing cuts on the beat.
+    // Audio device is the clock when playing: its crystal won't match the system clock,
+    // and wall-clock timing would let picture and sound drift apart.
     const bool audioDriving = audio_ != nullptr && audio_->playing();
     if (audioDriving) {
-        // The device no longer stops itself at the end of a clip, because with several
-        // layers there is silence between them and halting at the first gap would end
-        // playback in the middle of a composition. So the end of the COMPOSITION is
-        // detected here instead, and the device is re-cued to match the transport.
+        // Detect end-of-composition here rather than end-of-clip: silence between layers
+        // would otherwise stop playback mid-composition.
         const double position = audio_->position();
         if (transport_.duration() > 0.0 && position >= transport_.duration()) {
             if (transport_.looping()) {

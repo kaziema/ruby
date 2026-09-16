@@ -8,12 +8,8 @@
 
 namespace ruby::ui {
 
-// The 30px tool bar: nine 24x22 tool buttons, a divider, and two labelled switches
-// (Snapping, Motion Blur). Machine readouts live in the status bar instead: this bar is
-// for things you act on.
-//
-// Custom-painted rather than assembled from QToolButtons: the sizes are exact and the
-// switch is a bespoke 26x13 pill with a 9px knob.
+// Tool bar: tool buttons, a divider, and labelled switches (Snapping, Motion Blur).
+// Custom-painted rather than QToolButtons, for exact sizes and the bespoke switch pill.
 class EditorToolBar : public QWidget {
     Q_OBJECT
 
@@ -24,9 +20,7 @@ signals:
     void toolSelected(int index);
 
 public:
-    // Which tool an index means. The bar emits an index because that is what it knows;
-    // anything that has to act on the choice needs the tool itself, and a second copy of
-    // the table somewhere else is a second copy that can disagree.
+    // Maps a bar index to its tool. Avoids duplicating the tool table elsewhere.
     [[nodiscard]] static ToolIcon toolAt(int index) noexcept;
 
 signals:
@@ -69,8 +63,7 @@ private:
     QRect homeRect_;
     QRect homeDividerRect_;
 
-    // The right side of the bar: named modes where After Effects puts workspace names,
-    // then the workspace menu itself collapsed to three dashes.
+    // Right side of the bar: named modes, then the workspace menu (three dashes).
     QList<QRect> featureRects_;
     QRect workspaceRect_;
     int hoverFeature_ = -1;
@@ -78,8 +71,8 @@ private:
     int activeTool_ = 0;
     int hoverTool_ = -1;
 
-    // Which panel group is showing, and which one the cursor is over. Separate from the
-    // tool state on purpose: picking a panel must not deselect your tool.
+    // Active/hovered panel, kept separate from tool state — picking a panel must not
+    // deselect the tool.
     int activePanel_ = 0;
     int hoverPanel_ = -1;
 };

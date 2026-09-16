@@ -16,12 +16,8 @@ void noteOnce(std::vector<std::string>& into, const std::string& text) {
     }
 }
 
-// Whether a `[` here opens an array literal or indexes something.
-//
-// This is the whole difficulty. `value[0]` indexes; `[0, 50]` is a literal that has to
-// become vec(0, 50). A regular expression cannot tell them apart, but the character before
-// it can: an identifier, a closing bracket or a closing paren means we are indexing
-// whatever came before. Anything else, including the start of the string, means a literal.
+// Whether `[` opens an array literal or indexes something. Disambiguated by the
+// preceding char: identifier/`)`/`]` means index, anything else means literal.
 bool opensArrayLiteral(const std::string& out) {
     for (auto it = out.rbegin(); it != out.rend(); ++it) {
         const char c = *it;
@@ -43,8 +39,7 @@ bool looksLikeAfterEffects(const std::string& source) {
             return true;
         }
     }
-    // An array literal, which is the tell that matters most and the one that cannot be a
-    // false positive: Lua has no `[` that is not an index.
+    // Strongest tell: Lua has no bare `[` that isn't an index.
     for (std::size_t i = 0; i < source.size(); ++i) {
         if (source[i] == '[' && opensArrayLiteral(source.substr(0, i))) {
             return true;
@@ -58,15 +53,13 @@ Conversion convertFromAfterEffects(const std::string& source) {
     std::string result;
     result.reserve(source.size() + 16);
 
-    // Tracks which open brackets were rewritten as vec(, so the matching close becomes a
-    // paren and an ordinary index stays an index.
+    // Tracks which open brackets became vec(, so the matching close becomes ) not ].
     std::vector<bool> bracketIsVec;
 
     for (std::size_t i = 0; i < source.size();) {
         const char c = source[i];
 
-        // String literals pass through untouched. Rewriting inside one would corrupt the
-        // string, and `loopOut('pingpong')` is a string this app actually reads.
+        // String literals pass through untouched — e.g. loopOut('pingpong') must survive.
         if (c == '"' || c == '\'') {
             const char quote = c;
             result += c;
@@ -112,9 +105,8 @@ Conversion convertFromAfterEffects(const std::string& source) {
                 result += '[';
                 bracketIsVec.push_back(false);
 
-                // AE indexes vectors from 0 and Lua from 1, so a literal index shifts up.
-                // Only a literal: `value[i]` cannot be converted without knowing what i
-                // is, and guessing would be worse than saying so.
+                // AE indexes from 0, Lua from 1, so a literal index shifts by 1. Only
+                // literals: `value[i]` can't be shifted without knowing i.
                 std::size_t j = i + 1;
                 while (j < source.size() && std::isspace(static_cast<unsigned char>(source[j])) != 0) {
                     ++j;
@@ -224,9 +216,8 @@ Conversion convertFromAfterEffects(const std::string& source) {
             continue;
         }
         if (c == '?') {
-            // A ternary. `cond and a or b` is usually right and quietly wrong when the
-            // middle value is false or nil, and working out where the branches begin and
-            // end needs a real parser. Refused rather than guessed at.
+            // `cond and a or b` is wrong when the middle value is false/nil, and finding
+            // branch boundaries needs a real parser — left as written.
             noteOnce(out.warnings,
                      "a ternary (? :) was left as written; Lua has no equivalent and "
                      "converting it safely needs a parser");

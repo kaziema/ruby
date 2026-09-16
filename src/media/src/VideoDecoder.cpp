@@ -116,9 +116,8 @@ VideoDecoder::VideoDecoder(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) 
 VideoDecoder::~VideoDecoder() = default;
 
 std::unique_ptr<VideoDecoder> VideoDecoder::open(const std::string& path) {
-    // FFmpeg logs a stream of benign complaints to stderr ("mmco: unref short failure",
-    // "timescale not set") that mean nothing is wrong and look exactly like something is.
-    // We report real failures by returning null, so the chatter buys us nothing.
+    // FFmpeg logs benign warnings that read like failures; we report real failures via
+    // null returns instead.
     static const bool quieted = [] {
         av_log_set_level(AV_LOG_FATAL);
         return true;
@@ -155,8 +154,7 @@ std::unique_ptr<VideoDecoder> VideoDecoder::open(const std::string& path) {
     if (avcodec_parameters_to_context(impl->codec, stream->codecpar) < 0) {
         return nullptr;
     }
-    // Decode threads matter a lot here: single-threaded 1080p decode cannot keep up
-    // with scrubbing, let alone playback.
+    // Multithreaded decode matters: single-threaded 1080p can't keep up with scrubbing.
     impl->codec->thread_count = 0;
     if (avcodec_open2(impl->codec, decoder, nullptr) < 0) {
         return nullptr;
@@ -179,16 +177,14 @@ double VideoDecoder::fps() const noexcept { return impl_->fps; }
 const VideoFrame* VideoDecoder::frameAt(double seconds) {
     seconds = std::clamp(seconds, 0.0, impl_->duration);
 
-    // Already showing the right frame. Scrubbing within one frame's duration is the
-    // common case during playback, so checking beats seeking.
+    // Already on the right frame; common while scrubbing, cheaper to check than to seek.
     const double frameDuration = (impl_->fps > 0.0) ? 1.0 / impl_->fps : 1.0 / 30.0;
     if (impl_->positioned && impl_->current.valid() && impl_->currentTime >= 0.0 &&
         seconds >= impl_->currentTime && seconds < impl_->currentTime + frameDuration) {
         return &impl_->current;
     }
 
-    // Going backwards, or far enough forwards that decoding through would be slower
-    // than seeking, means a seek. Forward-by-a-little decodes through instead.
+    // Seek unless moving forward by less than a second, where decoding through is faster.
     const bool forwardNearby = impl_->positioned && impl_->currentTime >= 0.0 &&
                                seconds > impl_->currentTime &&
                                seconds - impl_->currentTime < 1.0;

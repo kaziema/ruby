@@ -13,10 +13,8 @@ namespace ruby::core {
 
 // --- Value -------------------------------------------------------------------
 //
-// One representation for every animatable property: up to four doubles plus a
-// component count. Covers scalars (opacity), pairs (position, scale), triples,
-// and RGBA. A variant would be more precise and much more annoying to interpolate;
-// this is the simplest thing that works for every property we actually animate.
+// One representation for every animatable property: up to 4 doubles + a count.
+// Covers scalars, pairs, triples, RGBA. Simpler to interpolate than a variant.
 
 struct Value {
     std::array<double, 4> c{};
@@ -38,13 +36,9 @@ struct Value {
 
 // --- Keyframes ---------------------------------------------------------------
 //
-// Times are TimeValue, so a keyframe authored in beats stays in beats. That is what
-// makes a preset survive being dropped on a song at a different tempo.
-//
-// Easing is modelled the way the design's Keyframe Assistant exposes it: an
-// ease-out influence leaving a key, an ease-in influence arriving at the next, and
-// an overshoot amount. Those three map onto the assistant's tiles and its three
-// editable numeric fields.
+// Times are TimeValue, so a keyframe authored in beats stays in beats across tempo
+// changes. Easing: ease-out influence leaving a key, ease-in arriving at the next,
+// plus an overshoot amount.
 
 enum class Interpolation {
     Linear,
@@ -59,11 +53,10 @@ struct Keyframe {
 
     double easeOut = 0.0;    // 0..1 influence leaving this key
     double easeIn = 0.0;     // 0..1 influence arriving at this key
-    double overshoot = 0.0;  // 0..1, the assistant's OVER tile
+    double overshoot = 0.0;  // 0..1 overshoot amount (back-out easing)
 };
 
-// Maps normalised time 0..1 to eased 0..1 for the segment between two keys.
-// Exposed because the graph editor draws this exact curve.
+// Maps normalized 0..1 time to eased 0..1; exposed so the graph editor can draw it.
 [[nodiscard]] double easeCurve(double t, double easeOut, double easeIn,
                                double overshoot) noexcept;
 
@@ -80,10 +73,9 @@ struct Property {
     std::string group = "Transform";
     SpatialUnit unit = SpatialUnit::Normalized;
 
-    // Copied from the effect's ParamSpec when the instance is made, and set directly for
-    // a layer's own transform properties, which have no schema behind them. Lives on the
-    // runtime property because the inspector and the compositor only ever see this, the
-    // same reason `unit` and `label` are duplicated here.
+    // Copied from ParamSpec on instantiation, or set directly for transform properties
+    // (no schema). Duplicated here, like unit/label, since inspector/compositor only
+    // ever see the runtime property.
     ParamRange range;
 
     Value staticValue;           // used when there are no keyframes
@@ -93,16 +85,15 @@ struct Property {
 
     [[nodiscard]] bool animated() const noexcept { return !keys.empty(); }
 
-    // Every component put inside `range`. Public because expressions need it: a script
-    // that returns 4000 for opacity has to land in the same place a keyframe would.
+    // Clamps every component to `range`. Public so expressions land in the same range
+    // a keyframe would.
     [[nodiscard]] Value clamped(Value v) const noexcept;
 
-    // Inserts in time order and returns the index. A key already at that time is
-    // replaced, which is what clicking the navigator's centre diamond does.
+    // Inserts in time order, returns the index. Replaces an existing key at the same time.
     std::size_t addKey(const Keyframe& k, const TimeContext& ctx);
 
-    // Value at a wall-clock second. Before the first key returns the first value,
-    // after the last returns the last, matching AE and every editor's expectation.
+    // Value at a wall-clock second; clamps to the first/last key outside their range
+    // (matches AE).
     [[nodiscard]] Value evaluate(double seconds, const TimeContext& ctx) const;
 };
 
