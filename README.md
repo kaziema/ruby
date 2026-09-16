@@ -55,33 +55,23 @@ Pre-alpha
 
 Done so far:
 
-- Real GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied
+- Real GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied alpha
 
-alpha
-
-- 8 built-in effects running on a real adapter: Grade, Lift Gamma Gain, Gaussian Blur,
-
-Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
+- 8 built-in effects running on a real adapter: Grade, Lift Gamma Gain, Gaussian Blur, Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
 
 - Direct manipulation in the viewer: select, move, rotate, and resize a layer by dragging it
 
 - Multi-layer selection, align, and distribute
 
-- Timeline with keyframes, effect stacks, and a moveable-panel workspace (drag panels
-
-between tabs)
+- Timeline with keyframes, effect stacks, and a moveable-panel workspace (drag panels between tabs)
 
 - A render graph and a RAM-tier preview cache
 
-- Video and audio import and decode (FFmpeg), a real-time audio mixer, and a per-layer
-
-keyframeable audio level control
+- Video and audio import and decode (FFmpeg), a real-time audio mixer, and a per-layer keyframeable audio level control
 
 - Project save/load (`.rbypr`, JSON) with a schema + migration harness
 
-- 31 automated tests, `ctest`-driven, covering the document model, the render graph, the
-
-mixer, and the viewer's hit-testing math
+- 31 automated tests, `ctest`-driven, covering the document model, the render graph, the mixer, and the viewer's hit-testing math
 
 Still to do:
 
