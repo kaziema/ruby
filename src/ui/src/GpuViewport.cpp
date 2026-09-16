@@ -249,6 +249,49 @@ core::Transform2D unitToWidget(const core::Composition& comp, const core::Layer&
     return unitToLayer.then(toComp).then(compToWidget);
 }
 
+// The eight resize handles, in the same unit-box coordinates the overlay is drawn in
+// (0,0 is the top-left of the layer's own box, 1,1 the bottom-right). One table drives
+// both where they are painted and where a click is allowed to grab one, so a handle can
+// never be drawn somewhere a drag does not agree it is.
+struct HandleSpec {
+    double u, v;
+    bool affectsX, affectsY;  // which axis of scale dragging this handle changes
+    double markerSize;
+};
+
+constexpr HandleSpec kHandles[8] = {
+    {0.0, 0.0, true, true, 7.0},    // top-left
+    {1.0, 0.0, true, true, 7.0},    // top-right
+    {1.0, 1.0, true, true, 7.0},    // bottom-right
+    {0.0, 1.0, true, true, 7.0},    // bottom-left
+    {0.5, 0.0, false, true, 5.0},   // top edge
+    {0.5, 1.0, false, true, 5.0},   // bottom edge
+    {0.0, 0.5, true, false, 5.0},   // left edge
+    {1.0, 0.5, true, false, 5.0},   // right edge
+};
+
+// The handle nearest a click, if any is close enough to count as a grab rather than a
+// click past it. A little more forgiving than the drawn marker size, same as any small
+// hit target.
+std::optional<HandleSpec> hitHandle(const core::Transform2D& toWidget,
+                                    const QPointF& surfacePos) {
+    constexpr double kHitRadius = 9.0;
+    std::optional<HandleSpec> best;
+    double bestDist = kHitRadius;
+    for (const HandleSpec& h : kHandles) {
+        const double px = toWidget.applyX(h.u, h.v);
+        const double py = toWidget.applyY(h.u, h.v);
+        const double dx = px - surfacePos.x();
+        const double dy = py - surfacePos.y();
+        const double dist = std::sqrt(dx * dx + dy * dy);
+        if (dist <= bestDist) {
+            bestDist = dist;
+            best = h;
+        }
+    }
+    return best;
+}
+
 }  // namespace
 
 QPointF GpuViewport::toSurface(const QPointF& widgetPos) const {
@@ -346,15 +389,11 @@ engine::Compositor::Overlay GpuViewport::buildOverlay() const {
     line(br, bl);
     line(bl, tl);
 
-    for (const QPointF& corner : {tl, tr, br, bl}) {
-        marker(corner, 7.0, 0.9f, 0.9f, 0.9f);
+    // The same eight handles hit-testing grabs for a scale drag, so the box always shows
+    // exactly what it will let you grab.
+    for (const HandleSpec& h : kHandles) {
+        marker(at(h.u, h.v), h.markerSize, 0.9f, 0.9f, 0.9f);
     }
-    // Edge midpoints, smaller, so the box reads as eight handles rather than four corners
-    // and four accidents.
-    marker(at(0.5, 0.0), 5.0, 0.9f, 0.9f, 0.9f);
-    marker(at(0.5, 1.0), 5.0, 0.9f, 0.9f, 0.9f);
-    marker(at(0.0, 0.5), 5.0, 0.9f, 0.9f, 0.9f);
-    marker(at(1.0, 0.5), 5.0, 0.9f, 0.9f, 0.9f);
 
     // The anchor point, which is what rotation and scale pivot around. Drawn always rather
     // than only with the Anchor tool: not knowing where the pivot is is the single most
@@ -426,6 +465,31 @@ void GpuViewport::mousePressEvent(QMouseEvent* e) {
     if (tool_ != ToolIcon::Selection && tool_ != ToolIcon::Rotation &&
         tool_ != ToolIcon::Anchor) {
         return;
+    }
+
+    // A handle on the layer that is already selected takes priority over re-picking:
+    // grabbing the corner of the thing you have selected resizes it, rather than starting
+    // a fresh click-to-select underneath it.
+    if (tool_ == ToolIcon::Selection && selected_.has_value()) {
+        if (const core::Layer* layer = comp_->find(*selected_);
+            layer != nullptr && layer->kind != core::LayerKind::Audio) {
+            const core::Transform2D toWidget =
+                unitToWidget(*comp_, *layer, currentTime_, layerSizes_, surfaceFit());
+            if (const std::optional<HandleSpec> handle = hitHandle(toWidget, pos)) {
+                const core::TimeContext ctx = comp_->timeContext();
+                grab_ = Grab::Scale;
+                grabStart_ = pos;
+                grabOriginal_ = valueOf(*layer, "scale", currentTime_, ctx,
+                                        core::Value::vec2(100.0, 100.0));
+                grabHandleU_ = handle->u;
+                grabHandleV_ = handle->v;
+                grabAffectsX_ = handle->affectsX;
+                grabAffectsY_ = handle->affectsY;
+                grabBack_ = toWidget.inverse();
+                emit manipulationBegan(QStringLiteral("Scale Layer"));
+                return;
+            }
+        }
     }
 
     const std::optional<core::LayerId> hit = layerAt(pos);
@@ -566,6 +630,48 @@ void GpuViewport::mouseMoveEvent(QMouseEvent* e) {
                        core::Value::vec2(grabOriginal_.c[0] + (u1 - u0) * 100.0,
                                          grabOriginal_.c[1] + (v1 - v0) * 100.0),
                        currentTime_, ctx);
+            break;
+        }
+        case Grab::Scale: {
+            core::Property* p = layer->find("scale");
+            if (p == nullptr) {
+                return;
+            }
+            // The mouse position put back through the box-to-widget transform as it stood
+            // at press, fixed for the whole drag exactly like Rotate fixes its pivot angle
+            // at press: recomputing it against the layer's own live (already-changing)
+            // scale would make the math chase a target that moves because of the math.
+            const double u1 = grabBack_.applyX(pos.x(), pos.y());
+            const double v1 = grabBack_.applyY(pos.x(), pos.y());
+
+            const core::Value anchor = valueOf(*layer, "anchor_point", currentTime_, ctx,
+                                               core::Value::vec2(0.0, 0.0));
+            const double au = 0.5 + anchor.c[0] / 100.0;
+            const double av = 0.5 + anchor.c[1] / 100.0;
+
+            // Scale pivots at the anchor point, same as Rotate, so the new scale is
+            // whatever ratio keeps the grabbed handle under the cursor, measured as the
+            // handle's distance from the anchor before and after the drag.
+            double sx = grabOriginal_.c[0];
+            double sy = grabOriginal_.c[1];
+            constexpr double kMinDenom = 1e-3;
+            if (grabAffectsX_ && std::fabs(grabHandleU_ - au) > kMinDenom) {
+                sx = grabOriginal_.c[0] * (u1 - au) / (grabHandleU_ - au);
+            }
+            if (grabAffectsY_ && std::fabs(grabHandleV_ - av) > kMinDenom) {
+                sy = grabOriginal_.c[1] * (v1 - av) / (grabHandleV_ - av);
+            }
+            // Shift on a corner handle keeps the aspect ratio, driven by whichever axis
+            // moved further, the same "decide from the bigger delta" rule Move uses.
+            if (grabAffectsX_ && grabAffectsY_ &&
+                e->modifiers().testFlag(Qt::ShiftModifier)) {
+                const double rx = grabOriginal_.c[0] != 0.0 ? sx / grabOriginal_.c[0] : 1.0;
+                const double ry = grabOriginal_.c[1] != 0.0 ? sy / grabOriginal_.c[1] : 1.0;
+                const double r = std::fabs(rx - 1.0) >= std::fabs(ry - 1.0) ? rx : ry;
+                sx = grabOriginal_.c[0] * r;
+                sy = grabOriginal_.c[1] * r;
+            }
+            writeValue(*p, core::Value::vec2(sx, sy), currentTime_, ctx);
             break;
         }
         case Grab::None:

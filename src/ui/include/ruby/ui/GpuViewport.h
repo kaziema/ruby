@@ -110,7 +110,7 @@ private:
 
     // What a drag is doing. Decided on press and fixed until release, because a gesture
     // that changes meaning halfway through is a gesture nobody can aim.
-    enum class Grab { None, Move, Rotate, Anchor };
+    enum class Grab { None, Move, Rotate, Anchor, Scale };
 
     ToolIcon tool_ = ToolIcon::Selection;
     std::optional<core::LayerId> selected_;
@@ -120,6 +120,15 @@ private:
     QPointF grabStart_;
     core::Value grabOriginal_;   // the property's value when the drag began
     double grabAngle_ = 0.0;     // for Rotate: the angle from the anchor at press
+
+    // For Scale: which handle was grabbed (in the same unit-box coordinates the handles
+    // are drawn in) and the box-to-widget transform as it stood at press, held fixed for
+    // the whole drag so the math below doesn't chase a target that is itself moving.
+    double grabHandleU_ = 0.0;
+    double grabHandleV_ = 0.0;
+    bool grabAffectsX_ = true;
+    bool grabAffectsY_ = true;
+    core::Transform2D grabBack_;
 
     gpu::GpuDevice* device_ = nullptr;
     gpu::SurfaceHandle surface_;

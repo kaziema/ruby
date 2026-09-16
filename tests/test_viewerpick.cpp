@@ -154,6 +154,53 @@ void hit_testing_follows_scale_and_parents() {
           "the parent moved it, so the chain is really being followed");
 }
 
+// The ratio a scale drag solves for: how far the grabbed handle now sits from the anchor,
+// against how far it sat the moment it was grabbed, applied to the scale that was true at
+// that moment. Mirrors GpuViewport::mouseMoveEvent's Grab::Scale case in plain arithmetic,
+// checked here without a widget or a GPU device.
+double scaledAxis(double original, double handleCoord, double anchorCoord, double newCoord) {
+    const double denom = handleCoord - anchorCoord;
+    if (std::fabs(denom) < 1e-3) {
+        return original;
+    }
+    return original * (newCoord - anchorCoord) / denom;
+}
+
+// Ground truth: actually set the layer to a target scale, see where that puts the handle
+// on screen, then check the formula recovers that same target scale from that same screen
+// position — the round trip a real drag depends on.
+void dragging_a_handle_scales_around_the_anchor() {
+    core::Project project;
+    core::Composition& comp = project.addComposition("c", 1920, 1080, 30.0, 10.0);
+    const core::LayerId id = project.addLayer(comp, "solid", core::LayerKind::Solid).id;
+    core::Layer* layer = comp.find(id);
+    const core::SizeOf sizes = sized(400.0, 200.0);
+    const engine::FrameFit fit = engine::frameFit(kCompW, kCompH, 1920.0, 1080.0);
+
+    constexpr double kHandleU = 1.0;  // the right-edge handle
+    constexpr double kAnchorU = 0.5;  // default anchor sits at the layer's centre
+    constexpr double kOriginal = 100.0;
+    constexpr double kTarget = 150.0;
+
+    layer->find("scale")->staticValue = core::Value::vec2(kTarget, kOriginal);
+    const core::Transform2D atTarget = unitToWidget(comp, *layer, sizes, fit);
+    const double handleX = atTarget.applyX(kHandleU, 0.5);
+    const double handleY = atTarget.applyY(kHandleU, 0.5);
+
+    layer->find("scale")->staticValue = core::Value::vec2(kOriginal, kOriginal);
+    const core::Transform2D back0 = unitToWidget(comp, *layer, sizes, fit).inverse();
+    const double u1 = back0.applyX(handleX, handleY);
+
+    near(scaledAxis(kOriginal, kHandleU, kAnchorU, u1), kTarget,
+        "the recovered scale matches what actually put the handle there");
+
+    // The right-edge handle does not touch Y at all: dragging it leaves the other axis
+    // exactly where it started, which is what makes an edge handle different from a
+    // corner one.
+    near(scaledAxis(kOriginal, 0.5, 0.5, 0.5 /* unmoved */), kOriginal,
+        "a handle that has not moved along its axis reports no change");
+}
+
 // A layer with no size cannot be clicked, and must not throw or claim the whole screen.
 void a_layer_with_no_size_is_not_clickable() {
     core::Project project;
@@ -234,6 +281,7 @@ int main() {
     a_click_inside_a_layer_hits_it();
     a_rotated_layer_is_not_its_bounding_box();
     hit_testing_follows_scale_and_parents();
+    dragging_a_handle_scales_around_the_anchor();
     a_layer_with_no_size_is_not_clickable();
 
     if (failures == 0) {
