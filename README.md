@@ -1,5 +1,7 @@
 # Ruby
 
+<img src="docs/ruby-gem.svg" width="120" alt="Ruby" />
+
 A layer-based compositor and motion tool for video editors.
 
 **Cross-platform C++, Qt 6, GPU compositing.**

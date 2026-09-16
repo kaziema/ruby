@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="212" viewBox="0 0 100 106">
+  <defs>
+    <linearGradient id="rubygem-a" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#FF8FA3" />
+      <stop offset="1" stop-color="#C41E43" />
+    </linearGradient>
+    <linearGradient id="rubygem-b" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#E8425F" />
+      <stop offset="1" stop-color="#7C0F2C" />
+    </linearGradient>
+    <linearGradient id="rubygem-c" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B31C40" />
+      <stop offset="1" stop-color="#54081E" />
+    </linearGradient>
+    <linearGradient id="rubygem-d" x1="0" y1="0" x2="1" y2="0.4">
+      <stop offset="0" stop-color="#FFC2CD" />
+      <stop offset="1" stop-color="#F0637E" />
+    </linearGradient>
+    <filter id="rubygem-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feDropShadow dx="0" dy="0" stdDeviation="14" flood-color="#C81E46" flood-opacity="0.5" />
+      <feDropShadow dx="0" dy="0" stdDeviation="28" flood-color="#781A78" flood-opacity="0.45" />
+    </filter>
+  </defs>
+  <g filter="url(#rubygem-glow)">
+    <polygon points="50,4 22,30 50,30" fill="url(#rubygem-d)" />
+    <polygon points="50,4 78,30 50,30" fill="url(#rubygem-a)" />
+    <polygon points="22,30 6,30 50,4" fill="#F27E93" opacity="0.85" />
+    <polygon points="78,30 94,30 50,4" fill="#A81838" />
+    <polygon points="6,30 50,30 50,102" fill="url(#rubygem-b)" />
+    <polygon points="50,30 94,30 50,102" fill="url(#rubygem-c)" />
+    <polygon points="22,30 50,30 50,102" fill="#D43152" opacity="0.35" />
+    <polygon points="50,30 78,30 50,102" fill="#8E1231" opacity="0.5" />
+    <line x1="6" y1="30" x2="94" y2="30" stroke="#FFD9E0" stroke-width="1.1" opacity="0.55" />
+    <polygon points="50,4 50,30 22,30" fill="#FFFFFF" opacity="0.14" />
+  </g>
+</svg>
