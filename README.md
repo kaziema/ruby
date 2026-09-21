@@ -55,7 +55,7 @@ Pre-alpha
 
 Done so far:
 
-- Real GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied alpha
+-  GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied alpha
 
 - 8 built-in effects running on a real adapter: Grade, Lift Gamma Gain, Gaussian Blur, Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
 
