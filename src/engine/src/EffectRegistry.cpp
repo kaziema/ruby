@@ -15,7 +15,7 @@ using core::SpatialUnit;
 constexpr const char* kEffectPrologue = R"(
 struct EffectUniforms {
     params   : array<vec4<f32>, 8>,
-    masks    : array<vec4<f32>, 12>,  // 3 per mask, kMaxMasks = 4
+    masks    : array<vec4<f32>, MASK_SLOTS>,  // 3 per mask, substituted from kMaxMasks
     maskInfo : vec4<f32>,             // x = active mask count
 };
 @group(0) @binding(0) var<uniform> u    : EffectUniforms;
@@ -112,8 +112,18 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
 }
 )";
 
+// The uniform array's length is kMaxMasks * 3. Substituted rather than written into the
+// WGSL by hand: the shader and the C++ struct have to agree, and nothing else would catch
+// them drifting apart.
 std::string shaderFor(const char* body) {
-    return std::string(kEffectPrologue) + body + kEffectEpilogue;
+    std::string out = std::string(kEffectPrologue) + body + kEffectEpilogue;
+    const std::string token = "MASK_SLOTS";
+    const std::string slots = std::to_string(core::EffectInstance::kMaxMasks * 3);
+    for (std::size_t at = out.find(token); at != std::string::npos;
+         at = out.find(token, at + slots.size())) {
+        out.replace(at, token.size(), slots);
+    }
+    return out;
 }
 
 // Range has no default: an unbounded param must be explicit (ParamRange::unbounded).
