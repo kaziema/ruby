@@ -14,8 +14,7 @@ Ruby is a non-linear editor inspired heavily by After Effects. The majority of s
 on social platforms are done in After Effects, due to its
 extensive powerhouse features. 
 
-Unfortunately, it has a very intense learning curve, as the software was designed with motion graphics in mind. 
-not specifically video editing. 
+Unfortunately, it has a very intense learning curve, as the software was designed with motion graphics in mind and not specifically video editing. 
 Also, to maximize its potential, you have to download plugin suites. These suites are ridiculously expensive and, if you are to be a little covert about 
 where you source it from, can be dangerous to install cracked patches for.
 
@@ -24,7 +23,7 @@ features, such as After Effects, designed specifically for video editors.
 
 ### How the idea formed
 
-After downloading ten different packs for Premiere Pro that had no mention of requiring a host of suite plugins (and then finding out that those plugins still cost the same as they did a decade ago), I decided to research not only how NLEs were built but also how they infrastructure exportable items such as presets (JSON, JavaScript, etc.).  
+After downloading ten different packs for After Effects and Premiere Pro that had no mention of requiring a host of suite plugins (and then finding out that those plugins still cost the same as they did a decade ago), I decided to research not only how NLEs were built but also how they infrastructure exportable items such as presets (JSON, JavaScript, etc.).  
 
 I took apart 5 real, commercially sold editing packs to check that. Out of their almost 150 individual presets, 148
 require paid third-party plugins to function at all, with no notice that they were required. That is no bueno.
@@ -57,7 +56,7 @@ Done so far:
 
 -  GPU render path (Dawn/WebGPU), linear-light compositing in RGBA16Float, premultiplied alpha
 
-- 8 built-in effects running on a real adapter: Grade, Lift Gamma Gain, Gaussian Blur, Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
+- 8 built-in effects running on an adapter: Grade, Lift Gamma Gain, Gaussian Blur, Directional Blur, Chromatic Aberration, Glow, Vignette, Posterize
 
 - Direct manipulation in the viewer: select, move, rotate, and resize a layer by dragging it
 
