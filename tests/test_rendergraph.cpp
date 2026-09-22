@@ -109,6 +109,45 @@ void changing_an_effect_parameter_changes_the_layer() {
           "a parameter change changes the layer's output");
 }
 
+// Masks change what an effect outputs, so they must reach its hash; a None mask draws
+// nothing and must not cost a cache miss.
+void masks_reach_the_effect_hash() {
+    Scene s;
+    core::EffectInstance fx;
+    fx.effectId = "core.stylize.vignette";
+    fx.schema = 1;
+    s.layer(s.b).effects.push_back(fx);
+    const auto effectHash = [&s] {
+        const engine::RenderGraph g = s.at(1.0);
+        return g.nodes[static_cast<std::size_t>(g.outputFor(s.b))].hash;
+    };
+    core::EffectInstance& live = s.layer(s.b).effects[0];
+
+    const engine::NodeHash none = effectHash();
+    live.masks.push_back(core::makeMask(core::MaskShape::Ellipse, "Mask 1"));
+    live.masks[0].mode = core::MaskMode::None;
+    check(effectHash() == none, "a None mask leaves the hash alone");
+
+    live.masks[0].mode = core::MaskMode::Add;
+    const engine::NodeHash added = effectHash();
+    check(added != none, "an active mask changes the hash");
+
+    live.masks[0].find("feather")->staticValue = core::Value::scalar(10.0);
+    const engine::NodeHash feathered = effectHash();
+    check(feathered != added, "a mask parameter change changes the hash");
+
+    live.masks[0].mode = core::MaskMode::Subtract;
+    const engine::NodeHash subtracted = effectHash();
+    check(subtracted != feathered, "a mode change changes the hash");
+
+    live.masks[0].inverted = true;
+    check(effectHash() != subtracted, "inverting changes the hash");
+
+    live.masks[0].shape = core::MaskShape::Rectangle;
+    live.masks[0].inverted = false;
+    check(effectHash() != subtracted, "a shape change changes the hash");
+}
+
 // A disabled effect must not appear in the graph (it shouldn't cost a pass).
 void a_disabled_effect_is_absent_from_the_graph() {
     Scene s;
@@ -222,6 +261,7 @@ int main() {
     times_inside_one_frame_are_the_same_frame();
     moving_a_layer_leaves_its_own_output_alone();
     changing_an_effect_parameter_changes_the_layer();
+    masks_reach_the_effect_hash();
     a_disabled_effect_is_absent_from_the_graph();
     every_visible_change_moves_the_frame_hash();
     restacking_changes_the_frame();

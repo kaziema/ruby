@@ -812,8 +812,8 @@ void MainWindow::jumpToKeyframe(bool forward) {
         consider(p);
     }
     for (const core::EffectInstance& fx : layer->effects) {
-        for (const core::Property& p : fx.params) {
-            consider(p);
+        for (std::size_t i = 0; i < fx.propertyCount(); ++i) {
+            consider(*fx.property(i));
         }
     }
 
@@ -2591,6 +2591,8 @@ QWidget* MainWindow::buildBody() {
 
     connect(inspector_, &InspectorView::propertyEdited, timelinePanel,
             &TimelinePanel::refresh);
+    connect(inspector_, &InspectorView::effectsChanged, timelinePanel,
+            &TimelinePanel::refreshRows);
     connect(inspector_, &InspectorView::editBegan, this, &MainWindow::beginEdit);
     connect(inspector_, &InspectorView::editEnded, this, &MainWindow::endEdit);
 

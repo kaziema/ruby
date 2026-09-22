@@ -11,10 +11,12 @@ using core::ParamType;
 using core::SpatialUnit;
 
 // Shared prologue for every effect shader. Fullscreen triangle (3 verts, no diagonal
-// seam) instead of a quad.
+// seam) instead of a quad. Layout must match Compositor.cpp's EffectUniforms.
 constexpr const char* kEffectPrologue = R"(
 struct EffectUniforms {
-    params : array<vec4<f32>, 8>,
+    params   : array<vec4<f32>, 8>,
+    masks    : array<vec4<f32>, 12>,  // 3 per mask, kMaxMasks = 4
+    maskInfo : vec4<f32>,             // x = active mask count
 };
 @group(0) @binding(0) var<uniform> u    : EffectUniforms;
 @group(0) @binding(1) var        samp : sampler;
@@ -41,6 +43,78 @@ fn luma(c : vec3<f32>) -> f32 {
     return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 )";
+
+// Framework-owned entry point. Effects define `effect()`; this blends its result against
+// the pass's own input by mask coverage, so no effect knows masks exist. With no active
+// masks coverage is exactly 1.0 and mix() returns the effect's result bit-for-bit.
+//
+// Per mask: m0 = center.xy, size.zw (percent of layer); m1 = rotation, feather,
+// expansion (percent of width), opacity; m2 = shape (0 rect, 1 ellipse), mode (0 add,
+// 1 subtract, 2 intersect), inverted.
+constexpr const char* kEffectEpilogue = R"(
+fn maskCoverage(uv : vec2<f32>) -> f32 {
+    let count = i32(u.maskInfo.x);
+    if (count <= 0) {
+        return 1.0;
+    }
+    let size = vec2<f32>(textureDimensions(tex));
+    let p = uv * size;
+    var acc = 0.0;
+    for (var m = 0; m < count; m = m + 1) {
+        let m0 = u.masks[m * 3];
+        let m1 = u.masks[m * 3 + 1];
+        let m2 = u.masks[m * 3 + 2];
+
+        // Into the mask's own frame: pixel space, so a square size is square on screen.
+        let d = p - m0.xy * 0.01 * size;
+        let a = radians(m1.x);
+        let q = vec2<f32>(cos(a) * d.x + sin(a) * d.y, -sin(a) * d.x + cos(a) * d.y);
+        let extent = max(m0.zw * 0.005 * size, vec2<f32>(0.0));
+
+        var dist : f32;
+        if (m2.x < 0.5) {
+            let e = abs(q) - extent;
+            dist = length(max(e, vec2<f32>(0.0))) + min(max(e.x, e.y), 0.0);
+        } else {
+            // Scaled-circle approximation; exact ellipse distance isn't worth it for a feather.
+            let h = max(extent, vec2<f32>(0.0001));
+            dist = (length(q / h) - 1.0) * min(h.x, h.y);
+        }
+        dist = dist - m1.z * 0.01 * size.x;
+
+        // Minimum 1px feather doubles as edge antialiasing.
+        let feather = max(m1.y * 0.01 * size.x, 1.0);
+        var cov = 1.0 - smoothstep(-feather * 0.5, feather * 0.5, dist);
+        if (m2.z > 0.5) {
+            cov = 1.0 - cov;
+        }
+        cov = cov * clamp(m1.w * 0.01, 0.0, 1.0);
+
+        // A leading Add starts from nothing; a leading Subtract/Intersect starts from all.
+        if (m == 0 && m2.y > 0.5) {
+            acc = 1.0;
+        }
+        if (m2.y < 0.5) {
+            acc = acc + cov - acc * cov;
+        } else if (m2.y < 1.5) {
+            acc = acc * (1.0 - cov);
+        } else {
+            acc = acc * cov;
+        }
+    }
+    return clamp(acc, 0.0, 1.0);
+}
+
+@fragment
+fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    let original = textureSample(tex, samp, in.uv);
+    return mix(original, effect(in), maskCoverage(in.uv));
+}
+)";
+
+std::string shaderFor(const char* body) {
+    return std::string(kEffectPrologue) + body + kEffectEpilogue;
+}
 
 // Range has no default: an unbounded param must be explicit (ParamRange::unbounded).
 // All effects are schema 1; validate_against_previous enforces a version bump whenever
@@ -81,9 +155,8 @@ EffectDef makeGrade() {
 
     // Linear-light math throughout; contrast pivots on 18% grey (scene-referred mid),
     // not 0.5.
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     var c = textureSample(tex, samp, in.uv);
 
     let exposure   = u.params[0].x;
@@ -96,7 +169,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
 
     return vec4<f32>(max(c.rgb, vec3<f32>(0.0)), c.a);
 }
-)";
+)");
     return def;
 }
 
@@ -115,9 +188,8 @@ EffectDef makeBlur() {
               // 9 taps/axis; past ~10% of frame width this bands instead of blurring.
               R::atLeast(0.0, 10.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let radius = u.params[0].x * 0.01;
     if (radius <= 0.0) {
         return textureSample(tex, samp, in.uv);
@@ -137,7 +209,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     }
     return total / weightSum;
 }
-)";
+)");
     return def;
 }
 
@@ -155,9 +227,8 @@ EffectDef makeChromatic() {
               // Wraps; unbounded, slider covers one turn.
               R::unbounded(0.0, 360.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let amount = u.params[0].x * 0.01;
     let angle = radians(u.params[1].x);
     let dir = vec2<f32>(cos(angle), sin(angle)) * amount;
@@ -169,7 +240,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     let b = textureSample(tex, samp, in.uv - dir).b;
     return vec4<f32>(r, g.g, b, g.a);
 }
-)";
+)");
     return def;
 }
 
@@ -188,9 +259,8 @@ EffectDef makeGlow() {
         param("intensity", "Intensity", SpatialUnit::Percent, 100.0, 2,
               R::atLeast(0.0, 400.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let threshold = u.params[0].x;
     let radius    = u.params[1].x * 0.01;
     let intensity = u.params[2].x * 0.01;
@@ -211,7 +281,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(base.rgb + bloom / weightSum * intensity, base.a);
 }
-)";
+)");
     return def;
 }
 
@@ -228,9 +298,8 @@ EffectDef makeMotionBlur() {
               // Wraps; unbounded, slider covers one turn.
               R::unbounded(0.0, 360.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let len = u.params[0].x * 0.01;
     let angle = radians(u.params[1].x);
     if (len <= 0.0) {
@@ -244,7 +313,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     }
     return total / 13.0;
 }
-)";
+)");
     return def;
 }
 
@@ -264,9 +333,8 @@ EffectDef makeLiftGammaGain() {
         param("gain", "Gain", SpatialUnit::Normalized, 1.0, 2,
               R::atLeast(0.0, 4.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let lift  = u.params[0].x;
     let gamma = max(u.params[1].x, 0.01);
     let gain  = u.params[2].x;
@@ -277,7 +345,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     v = v * gain;
     return vec4<f32>(max(v, vec3<f32>(0.0)), c.a);
 }
-)";
+)");
     return def;
 }
 
@@ -294,9 +362,8 @@ EffectDef makeVignette() {
         param("softness", "Softness", SpatialUnit::Percent, 50.0, 1,
               R::between(0.0, 100.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let amount = u.params[0].x * 0.01;
     let softness = max(u.params[1].x * 0.01, 0.01);
 
@@ -306,7 +373,7 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
     let falloff = 1.0 - smoothstep(1.0 - softness, 1.0, d) * amount;
     return vec4<f32>(c.rgb * falloff, c.a);
 }
-)";
+)");
     return def;
 }
 
@@ -321,14 +388,13 @@ EffectDef makePosterize() {
               // Below 1 step the math is meaningless; hard floor.
               R::atLeast(1.0, 32.0)),
     };
-    def.shader = std::string(kEffectPrologue) + R"(
-@fragment
-fn fs(in : VsOut) -> @location(0) vec4<f32> {
+    def.shader = shaderFor(R"(
+fn effect(in : VsOut) -> vec4<f32> {
     let levels = max(u.params[0].x, 2.0);
     let c = textureSample(tex, samp, in.uv);
     return vec4<f32>(floor(c.rgb * levels) / levels, c.a);
 }
-)";
+)");
     return def;
 }
 

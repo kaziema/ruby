@@ -125,9 +125,77 @@ void a_valid_parent_survives_a_round_trip() {
 
 }  // namespace
 
+// Masks round-trip exactly; a shape this build can't draw is reported, never guessed.
+void masks_survive_a_round_trip() {
+    core::Project source;
+    core::Composition& comp = source.addComposition("c", 1080, 1920, 30.0, 10.0);
+    core::Layer& layer = source.addLayer(comp, "l", core::LayerKind::Solid);
+
+    core::EffectInstance fx;
+    fx.effectId = "core.color.grade";
+    fx.schema = 1;
+    core::Mask first = core::makeMask(core::MaskShape::Ellipse, "Mask 1");
+    first.mode = core::MaskMode::Subtract;
+    first.inverted = true;
+    first.find("feather")->staticValue = core::Value::scalar(7.5);
+    first.find("center")->addKey({core::TimeValue::seconds(1.0), core::Value::vec2(20.0, 80.0),
+                                  core::Interpolation::Linear, 0.0, 0.0, 0.0},
+                                 comp.timeContext());
+    fx.masks.push_back(first);
+    fx.masks.push_back(core::makeMask(core::MaskShape::Rectangle, "Mask 2"));
+    layer.effects.push_back(fx);
+
+    core::Project loaded;
+    const io::LoadReport report = io::fromJson(loaded, io::toJson(source));
+    check(report.clean(), "a project with masks loads cleanly");
+    const core::EffectInstance& back =
+        loaded.compositions().front().layers.front().effects.front();
+    check(back.masks.size() == 2, "both masks survive");
+    if (back.masks.size() == 2) {
+        const core::Mask& m = back.masks[0];
+        check(m.name == "Mask 1" && m.shape == core::MaskShape::Ellipse,
+              "name and shape survive");
+        check(m.mode == core::MaskMode::Subtract && m.inverted, "mode and invert survive");
+        check(m.find("feather")->staticValue.x() == 7.5, "a changed value survives");
+        check(m.find("center")->keys.size() == 1, "keyframes survive");
+        const core::Property* opacity = m.find("opacity");
+        check(opacity->range.maximum.has_value() && *opacity->range.maximum == 100.0,
+              "ranges come from the definition, not the file");
+        check(back.masks[1].shape == core::MaskShape::Rectangle &&
+                  back.masks[1].mode == core::MaskMode::Add,
+              "the second mask keeps its own settings");
+    }
+
+    // A mask-less effect writes no masks key, so files without masks are unchanged.
+    core::Project plain;
+    core::Composition& plainComp = plain.addComposition("c", 1080, 1920, 30.0, 10.0);
+    core::EffectInstance bare;
+    bare.effectId = "core.color.grade";
+    plain.addLayer(plainComp, "l", core::LayerKind::Solid).effects.push_back(bare);
+    check(io::toJson(plain).find("\"masks\"") == std::string::npos,
+          "an effect without masks writes no masks key");
+
+    // A newer build's shape (say, a Bezier mask) is skipped with a note.
+    std::string json = io::toJson(source);
+    const std::string key = "\"shape\": \"ellipse\"";
+    const auto at = json.find(key);
+    check(at != std::string::npos, "the shape is actually written");
+    if (at != std::string::npos) {
+        json.replace(at, key.size(), "\"shape\": \"bezier\"");
+        core::Project future;
+        const io::LoadReport r = io::fromJson(future, json);
+        check(r.ok, "a file with an unknown mask shape still loads");
+        check(!r.notes.empty(), "and says it skipped something");
+        const auto& masks = future.compositions().front().layers.front().effects.front().masks;
+        check(masks.size() == 1 && masks[0].name == "Mask 2",
+              "the unknown mask is skipped, not read as a rectangle");
+    }
+}
+
 int main() {
     a_parent_loop_in_a_file_is_broken_on_load();
     a_valid_parent_survives_a_round_trip();
+    masks_survive_a_round_trip();
 
     const core::Project original = makeProject();
 

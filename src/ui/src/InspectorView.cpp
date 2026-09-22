@@ -16,6 +16,8 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 
 #include "ruby/ui/Format.h"
 #include "ruby/ui/Theme.h"
@@ -58,11 +60,10 @@ const Property* InspectorView::resolve(const PropRef& ref) const {
         return i < l->properties.size() ? &l->properties[i] : nullptr;
     }
     const auto e = static_cast<std::size_t>(ref.effect);
-    if (e >= l->effects.size()) {
+    if (e >= l->effects.size() || ref.index < 0) {
         return nullptr;
     }
-    const auto i = static_cast<std::size_t>(ref.index);
-    return i < l->effects[e].params.size() ? &l->effects[e].params[i] : nullptr;
+    return l->effects[e].property(static_cast<std::size_t>(ref.index));
 }
 
 Property* InspectorView::resolveMutable(const PropRef& ref) {
@@ -148,7 +149,8 @@ void InspectorView::rebuildGroups() {
         const core::EffectInstance& effect = l->effects[e];
         const std::string name =
             effect.displayName.empty() ? effect.effectId : effect.displayName;
-        for (std::size_t i = 0; i < effect.params.size(); ++i) {
+        // Mask params follow the effect's own, labelled "Mask 1 Center" etc.
+        for (std::size_t i = 0; i < effect.propertyCount(); ++i) {
             addTo(name, static_cast<int>(e),
                   PropRef{static_cast<int>(e), static_cast<int>(i)});
         }
@@ -159,6 +161,7 @@ void InspectorView::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.fillRect(rect(), kPanelBody);
     fields_.clear();
+    effectHeaders_.clear();
 
     const Layer* l = layer();
     if (l == nullptr) {
@@ -189,6 +192,9 @@ void InspectorView::paintEvent(QPaintEvent*) {
         // Group header.
         const QRect header(0, y, width(), metrics::kInspectorGroupH);
         p.fillRect(header, kTabStrip);
+        if (group.effect >= 0) {
+            effectHeaders_.emplace_back(header, group.effect);
+        }
 
         p.setFont(font());
         p.setPen(kTextDim);
@@ -315,36 +321,160 @@ void InspectorView::paintEvent(QPaintEvent*) {
 }
 
 void InspectorView::contextMenuEvent(QContextMenuEvent* e) {
-    const ValueField* field = fieldAt(e->pos());
-    if (field == nullptr) {
-        return;
-    }
-    const core::Property* prop = resolve(field->property);
-    if (prop == nullptr) {
-        return;
-    }
-    const bool has = prop->expression.has_value() && !prop->expression->empty();
-
     QMenu menu(this);
-    QAction* edit = menu.addAction(has ? QStringLiteral("Edit Expression...")
-                                       : QStringLiteral("Add Expression..."));
-    QAction* remove = menu.addAction(QStringLiteral("Remove Expression"));
-    remove->setEnabled(has);
+    int effect = -1;
+    int mask = -1;
 
-    const PropRef ref = field->property;
-    connect(edit, &QAction::triggered, this, [this, ref] { editExpression(ref); });
-    connect(remove, &QAction::triggered, this, [this, ref] {
-        core::Property* target = resolveMutable(ref);
-        if (target == nullptr) {
+    if (const ValueField* field = fieldAt(e->pos()); field != nullptr) {
+        const core::Property* prop = resolve(field->property);
+        if (prop == nullptr) {
             return;
         }
-        emit editBegan(QStringLiteral("Remove Expression"));
-        target->expression.reset();
-        emit editEnded();
-        emit propertyEdited();
-        update();
+        const bool has = prop->expression.has_value() && !prop->expression->empty();
+
+        QAction* edit = menu.addAction(has ? QStringLiteral("Edit Expression...")
+                                           : QStringLiteral("Add Expression..."));
+        QAction* remove = menu.addAction(QStringLiteral("Remove Expression"));
+        remove->setEnabled(has);
+
+        const PropRef ref = field->property;
+        connect(edit, &QAction::triggered, this, [this, ref] { editExpression(ref); });
+        connect(remove, &QAction::triggered, this, [this, ref] {
+            core::Property* target = resolveMutable(ref);
+            if (target == nullptr) {
+                return;
+            }
+            emit editBegan(QStringLiteral("Remove Expression"));
+            target->expression.reset();
+            emit editEnded();
+            emit propertyEdited();
+            update();
+        });
+
+        effect = ref.effect;
+        if (const Layer* l = layer();
+            l != nullptr && effect >= 0 && effect < static_cast<int>(l->effects.size())) {
+            mask = l->effects[static_cast<std::size_t>(effect)].maskOf(
+                static_cast<std::size_t>(ref.index));
+        }
+    } else {
+        for (const auto& [rect, fx] : effectHeaders_) {
+            if (rect.contains(e->pos())) {
+                effect = fx;
+                break;
+            }
+        }
+    }
+
+    if (effect >= 0) {
+        if (!menu.isEmpty()) {
+            menu.addSeparator();
+        }
+        if (mask >= 0) {
+            maskMenu(menu, effect, mask);
+            menu.addSeparator();
+        }
+        addMaskMenu(menu, effect);
+    }
+    if (!menu.isEmpty()) {
+        menu.exec(e->globalPos());
+    }
+}
+
+void InspectorView::addMaskMenu(QMenu& menu, int effect) {
+    const Layer* l = layer();
+    if (l == nullptr || effect < 0 || effect >= static_cast<int>(l->effects.size())) {
+        return;
+    }
+    const bool full = static_cast<int>(l->effects[static_cast<std::size_t>(effect)].masks.size()) >=
+                      core::EffectInstance::kMaxMasks;
+
+    const auto add = [&](const QString& label, core::MaskShape shape) {
+        QAction* a = menu.addAction(label);
+        a->setEnabled(!full);
+        connect(a, &QAction::triggered, this, [this, effect, shape] {
+            editMasks(effect, QStringLiteral("Add Mask"), [shape](core::EffectInstance& fx) {
+                // One past the highest existing number, so a name is never shared.
+                int next = 1;
+                for (const core::Mask& m : fx.masks) {
+                    if (m.name.rfind("Mask ", 0) == 0) {
+                        next = std::max(next, std::atoi(m.name.c_str() + 5) + 1);
+                    }
+                }
+                fx.masks.push_back(core::makeMask(shape, "Mask " + std::to_string(next)));
+            });
+        });
+    };
+    add(QStringLiteral("Add Rectangle Mask"), core::MaskShape::Rectangle);
+    add(QStringLiteral("Add Ellipse Mask"), core::MaskShape::Ellipse);
+    if (full) {
+        menu.addAction(QStringLiteral("4 masks per effect is the limit"))->setEnabled(false);
+    }
+}
+
+void InspectorView::maskMenu(QMenu& menu, int effect, int mask) {
+    const Layer* l = layer();
+    if (l == nullptr || effect < 0 || effect >= static_cast<int>(l->effects.size())) {
+        return;
+    }
+    const core::EffectInstance& fx = l->effects[static_cast<std::size_t>(effect)];
+    if (mask < 0 || mask >= static_cast<int>(fx.masks.size())) {
+        return;
+    }
+    const core::Mask& m = fx.masks[static_cast<std::size_t>(mask)];
+    const QString name = QString::fromStdString(m.name);
+
+    QMenu* modes = menu.addMenu(QStringLiteral("%1 Mode").arg(name));
+    const std::pair<core::MaskMode, const char*> choices[] = {
+        {core::MaskMode::Add, "Add"},
+        {core::MaskMode::Subtract, "Subtract"},
+        {core::MaskMode::Intersect, "Intersect"},
+        {core::MaskMode::None, "None"},
+    };
+    for (const auto& [mode, label] : choices) {
+        QAction* a = modes->addAction(QString::fromUtf8(label));
+        a->setCheckable(true);
+        a->setChecked(m.mode == mode);
+        const core::MaskMode chosen = mode;
+        connect(a, &QAction::triggered, this, [this, effect, mask, chosen] {
+            editMasks(effect, QStringLiteral("Mask Mode"),
+                      [mask, chosen](core::EffectInstance& e) {
+                          e.masks[static_cast<std::size_t>(mask)].mode = chosen;
+                      });
+        });
+    }
+
+    QAction* invert = menu.addAction(QStringLiteral("Invert %1").arg(name));
+    invert->setCheckable(true);
+    invert->setChecked(m.inverted);
+    connect(invert, &QAction::triggered, this, [this, effect, mask] {
+        editMasks(effect, QStringLiteral("Invert Mask"), [mask](core::EffectInstance& e) {
+            core::Mask& target = e.masks[static_cast<std::size_t>(mask)];
+            target.inverted = !target.inverted;
+        });
     });
-    menu.exec(e->globalPos());
+
+    QAction* remove = menu.addAction(QStringLiteral("Delete %1").arg(name));
+    connect(remove, &QAction::triggered, this, [this, effect, mask] {
+        editMasks(effect, QStringLiteral("Delete Mask"), [mask](core::EffectInstance& e) {
+            e.masks.erase(e.masks.begin() + mask);
+        });
+    });
+}
+
+void InspectorView::editMasks(int effect, const QString& label,
+                              const std::function<void(core::EffectInstance&)>& change) {
+    core::Layer* l = mutableLayer();
+    if (l == nullptr || effect < 0 || effect >= static_cast<int>(l->effects.size())) {
+        return;
+    }
+    emit editBegan(label);
+    change(l->effects[static_cast<std::size_t>(effect)]);
+    emit editEnded();
+    rebuildGroups();
+    emit effectsChanged();
+    emit propertyEdited();
+    update();
 }
 
 void InspectorView::editExpression(const PropRef& ref) {

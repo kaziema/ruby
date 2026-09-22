@@ -445,7 +445,77 @@ void the_work_area_is_clamped_to_the_composition() {
 
 }  // namespace
 
+// Geometry is layer-relative percent and ranges are schema-owned.
+void a_new_mask_has_sane_defaults() {
+    const Mask m = makeMask(MaskShape::Ellipse, "Mask 1");
+    check(m.shape == MaskShape::Ellipse && m.mode == MaskMode::Add && !m.inverted,
+          "shape kept, adds by default, not inverted");
+    check(m.params.size() == 6, "six parameters");
+    const Property* center = m.find("center");
+    const Property* size = m.find("size");
+    const Property* feather = m.find("feather");
+    const Property* opacity = m.find("opacity");
+    check(center != nullptr && center->staticValue.count == 2 &&
+              center->staticValue.x() == 50.0 && center->staticValue.y() == 50.0,
+          "centred on the layer");
+    check(size != nullptr && size->staticValue.x() == 50.0, "half the layer by default");
+    check(feather != nullptr && feather->range.clamp(-5.0) == 0.0,
+          "feather cannot go negative");
+    check(opacity != nullptr && opacity->range.clamp(150.0) == 100.0,
+          "opacity is capped at 100");
+    check(center != nullptr && center->label == "Mask 1 Center",
+          "labels carry the mask's name");
+}
+
+// The inspector and timeline address mask params as indices after the effect's own.
+void mask_params_follow_effect_params_in_flat_order() {
+    EffectInstance fx;
+    fx.params.resize(3);
+    fx.masks.push_back(makeMask(MaskShape::Rectangle, "Mask 1"));
+    fx.masks.push_back(makeMask(MaskShape::Ellipse, "Mask 2"));
+    check(fx.propertyCount() == 15, "count spans the params and both masks");
+    check(fx.property(0) == &fx.params[0], "index 0 is the first param");
+    check(fx.property(3) == &fx.masks[0].params[0], "index 3 is the first mask's first param");
+    check(fx.property(9) == &fx.masks[1].params[0], "index 9 is the second mask's first");
+    check(fx.property(15) == nullptr, "past the end is null");
+    check(fx.maskOf(2) == -1 && fx.maskOf(3) == 0 && fx.maskOf(14) == 1,
+          "maskOf names the owner");
+}
+
+// What renders, and what's hashed, skips None masks and stops at the cap.
+void active_masks_skip_none_and_respect_the_cap() {
+    EffectInstance fx;
+    for (int i = 0; i < 6; ++i) {
+        fx.masks.push_back(makeMask(MaskShape::Rectangle, "Mask " + std::to_string(i + 1)));
+    }
+    fx.masks[1].mode = MaskMode::None;
+    const std::vector<const Mask*> active = activeMasks(fx);
+    check(static_cast<int>(active.size()) == EffectInstance::kMaxMasks, "capped");
+    check(active.size() >= 2 && active[0] == &fx.masks[0] && active[1] == &fx.masks[2],
+          "the None mask is skipped and order is kept");
+}
+
+void mask_keyframes_count_toward_the_layer() {
+    Project project;
+    Composition& comp = project.addComposition("c", 1080, 1920, 30.0, 10.0);
+    Layer& layer = project.addLayer(comp, "l", LayerKind::Solid);
+    const int before = layer.keyframeCount();
+
+    EffectInstance fx;
+    fx.masks.push_back(makeMask(MaskShape::Ellipse, "Mask 1"));
+    Keyframe k;
+    k.time = TimeValue::seconds(1.0);
+    k.value = Value::scalar(10.0);
+    fx.masks[0].find("feather")->addKey(k, comp.timeContext());
+    layer.effects.push_back(fx);
+    check(layer.keyframeCount() == before + 1, "a mask keyframe counts");
+}
+
 int main() {
+    a_new_mask_has_sane_defaults();
+    mask_params_follow_effect_params_in_flat_order();
+    active_masks_skip_none_and_respect_the_cap();
+    mask_keyframes_count_toward_the_layer();
     an_empty_rhythm_map_is_an_ordinary_state();
     markers_are_sorted_however_they_arrive();
     snapping_picks_the_nearest_marker();

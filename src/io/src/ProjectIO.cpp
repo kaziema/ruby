@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 namespace ruby::io {
@@ -156,6 +157,37 @@ SpatialUnit spatialUnit(const std::string& s) {
     return SpatialUnit::Normalized;
 }
 
+const char* name(MaskShape s) {
+    switch (s) {
+        case MaskShape::Rectangle: return "rectangle";
+        case MaskShape::Ellipse:   return "ellipse";
+    }
+    return "rectangle";
+}
+// Unknown means a newer build wrote it (a Bezier mask, say). Refused, never guessed:
+// reading it as a rectangle would silently change what the effect covers.
+std::optional<MaskShape> maskShape(const std::string& s) {
+    if (s == "rectangle") return MaskShape::Rectangle;
+    if (s == "ellipse")   return MaskShape::Ellipse;
+    return std::nullopt;
+}
+
+const char* name(MaskMode m) {
+    switch (m) {
+        case MaskMode::Add:       return "add";
+        case MaskMode::Subtract:  return "subtract";
+        case MaskMode::Intersect: return "intersect";
+        case MaskMode::None:      return "none";
+    }
+    return "none";
+}
+MaskMode maskMode(const std::string& s) {
+    if (s == "add")       return MaskMode::Add;
+    if (s == "subtract")  return MaskMode::Subtract;
+    if (s == "intersect") return MaskMode::Intersect;
+    return MaskMode::None;  // unknown mode renders as off, which is visible, not wrong
+}
+
 const char* name(TimeMode m) {
     switch (m) {
         case TimeMode::Beats:   return "beats";
@@ -239,13 +271,28 @@ json write(const Property& p) {
     return out;
 }
 
+json write(const Mask& m) {
+    json params = json::array();
+    for (const Property& p : m.params) params.push_back(write(p));
+    json out{{"name", m.name}, {"shape", name(m.shape)}, {"mode", name(m.mode)},
+             {"params", std::move(params)}};
+    if (m.inverted) out["inverted"] = true;
+    return out;
+}
+
 json write(const EffectInstance& e) {
     json params = json::array();
     for (const Property& p : e.params) params.push_back(write(p));
     // `schema` lets an older file migrate forward; never drop it.
-    return json{{"effect", e.effectId}, {"schema", e.schema},
-                {"name", e.displayName}, {"enabled", e.enabled},
-                {"expanded", e.expanded}, {"params", std::move(params)}};
+    json out{{"effect", e.effectId}, {"schema", e.schema},
+             {"name", e.displayName}, {"enabled", e.enabled},
+             {"expanded", e.expanded}, {"params", std::move(params)}};
+    if (!e.masks.empty()) {
+        json masks = json::array();
+        for (const Mask& m : e.masks) masks.push_back(write(m));
+        out["masks"] = std::move(masks);
+    }
+    return out;
 }
 
 json write(const Layer& l) {
@@ -553,6 +600,35 @@ LoadReport fromJson(Project& project, const std::string& text) {
                         if (e.contains("params") && e.at("params").is_array()) {
                             for (const auto& p : e.at("params")) {
                                 fx.params.push_back(readProperty(p));
+                            }
+                        }
+                        if (e.contains("masks") && e.at("masks").is_array()) {
+                            for (const auto& mj : e.at("masks")) {
+                                const std::string shapeName = str(mj, "shape", "rectangle");
+                                const std::optional<MaskShape> shape = maskShape(shapeName);
+                                if (!shape.has_value()) {
+                                    report.notes.push_back(
+                                        "layer \"" + layer.name + "\": skipped a \"" +
+                                        shapeName + "\" mask this version can't draw");
+                                    continue;
+                                }
+                                // Built from the canonical definition, then the saved
+                                // values laid on top: ranges stay schema-owned.
+                                Mask m = makeMask(*shape, str(mj, "name", "Mask"));
+                                m.mode = maskMode(str(mj, "mode", "add"));
+                                m.inverted = get<bool>(mj, "inverted", false);
+                                if (mj.contains("params") && mj.at("params").is_array()) {
+                                    for (const auto& pj : mj.at("params")) {
+                                        const Property stored = readProperty(pj);
+                                        if (Property* p = m.find(stored.key)) {
+                                            p->staticValue = stored.staticValue;
+                                            p->keys = stored.keys;
+                                            p->expression = stored.expression;
+                                            p->expanded = stored.expanded;
+                                        }
+                                    }
+                                }
+                                fx.masks.push_back(std::move(m));
                             }
                         }
                         layer.effects.push_back(std::move(fx));

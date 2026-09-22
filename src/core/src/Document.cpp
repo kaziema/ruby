@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace ruby::core {
 
@@ -142,6 +143,104 @@ const Property* EffectInstance::find(std::string_view key) const noexcept {
     return it == params.end() ? nullptr : &*it;
 }
 
+std::size_t EffectInstance::propertyCount() const noexcept {
+    std::size_t n = params.size();
+    for (const Mask& m : masks) {
+        n += m.params.size();
+    }
+    return n;
+}
+
+const Property* EffectInstance::property(std::size_t index) const noexcept {
+    if (index < params.size()) {
+        return &params[index];
+    }
+    index -= params.size();
+    for (const Mask& m : masks) {
+        if (index < m.params.size()) {
+            return &m.params[index];
+        }
+        index -= m.params.size();
+    }
+    return nullptr;
+}
+
+Property* EffectInstance::property(std::size_t index) noexcept {
+    return const_cast<Property*>(std::as_const(*this).property(index));
+}
+
+int EffectInstance::maskOf(std::size_t index) const noexcept {
+    if (index < params.size()) {
+        return -1;
+    }
+    index -= params.size();
+    for (std::size_t m = 0; m < masks.size(); ++m) {
+        if (index < masks[m].params.size()) {
+            return static_cast<int>(m);
+        }
+        index -= masks[m].params.size();
+    }
+    return -1;
+}
+
+Property* Mask::find(std::string_view key) noexcept {
+    const auto it = std::find_if(params.begin(), params.end(),
+                                 [key](const Property& p) { return p.key == key; });
+    return it == params.end() ? nullptr : &*it;
+}
+
+const Property* Mask::find(std::string_view key) const noexcept {
+    const auto it = std::find_if(params.begin(), params.end(),
+                                 [key](const Property& p) { return p.key == key; });
+    return it == params.end() ? nullptr : &*it;
+}
+
+Mask makeMask(MaskShape shape, std::string name) {
+    Mask mask;
+    mask.name = std::move(name);
+    mask.shape = shape;
+
+    const auto make = [&mask](const char* key, const char* label, SpatialUnit unit,
+                              ParamRange range, Value value) {
+        Property p;
+        p.key = key;
+        p.label = mask.name + " " + label;
+        p.group = mask.name;
+        p.unit = unit;
+        p.range = range;
+        p.staticValue = value;
+        mask.params.push_back(std::move(p));
+    };
+    make("center", "Center", SpatialUnit::Percent, ParamRange::unbounded(-50.0, 150.0),
+         Value::vec2(50.0, 50.0));
+    make("size", "Size", SpatialUnit::Percent, ParamRange::atLeast(0.0, 200.0),
+         Value::vec2(50.0, 50.0));
+    make("rotation", "Rotation", SpatialUnit::Degrees, ParamRange::unbounded(-360.0, 360.0),
+         Value::scalar(0.0));
+    make("feather", "Feather", SpatialUnit::PercentOfWidth, ParamRange::atLeast(0.0, 25.0),
+         Value::scalar(0.0));
+    // Negative shrinks the shape; a hard floor would forbid a real edit.
+    make("expansion", "Expansion", SpatialUnit::PercentOfWidth,
+         ParamRange::unbounded(-25.0, 25.0), Value::scalar(0.0));
+    make("opacity", "Opacity", SpatialUnit::Percent, ParamRange::between(0.0, 100.0),
+         Value::scalar(100.0));
+    return mask;
+}
+
+std::vector<const Mask*> activeMasks(const EffectInstance& effect) {
+    std::vector<const Mask*> out;
+    for (const Mask& m : effect.masks) {
+        if (m.mode == MaskMode::None) {
+            continue;
+        }
+        out.push_back(&m);
+        if (static_cast<int>(out.size()) == EffectInstance::kMaxMasks) {
+            break;
+        }
+    }
+    return out;
+}
+
 Property* Layer::find(std::string_view key) noexcept {
     const auto it = std::find_if(properties.begin(), properties.end(),
                                  [key](const Property& p) { return p.key == key; });
@@ -160,8 +259,8 @@ int Layer::keyframeCount() const noexcept {
         total += static_cast<int>(p.keys.size());
     }
     for (const EffectInstance& effect : effects) {
-        for (const Property& p : effect.params) {
-            total += static_cast<int>(p.keys.size());
+        for (std::size_t i = 0; i < effect.propertyCount(); ++i) {
+            total += static_cast<int>(effect.property(i)->keys.size());
         }
     }
     return total;

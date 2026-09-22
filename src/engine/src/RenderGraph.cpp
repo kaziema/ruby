@@ -189,6 +189,21 @@ RenderGraph buildGraph(const core::Project& project, const core::Composition& co
             for (const core::Property& p : fx.params) {
                 eh = hashProperty(layer, p, t, ctx, eh);
             }
+            // Same list the compositor packs, so a None mask can't cause a needless miss
+            // and an active one can't cause a stale hit.
+            // Skipped entirely when empty, so mask-less effects hash exactly as before.
+            const std::vector<const core::Mask*> masks = core::activeMasks(fx);
+            if (!masks.empty()) {
+                eh = hashInt(static_cast<std::int64_t>(masks.size()), eh);
+            }
+            for (const core::Mask* m : masks) {
+                eh = hashInt(static_cast<std::int64_t>(m->shape), eh);
+                eh = hashInt(static_cast<std::int64_t>(m->mode), eh);
+                eh = hashInt(m->inverted ? 1 : 0, eh);
+                for (const core::Property& p : m->params) {
+                    eh = hashProperty(layer, p, t, ctx, eh);
+                }
+            }
             node.hash = eh;
             graph.nodes.push_back(std::move(node));
             current = static_cast<int>(graph.nodes.size()) - 1;

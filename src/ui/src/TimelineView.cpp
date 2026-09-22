@@ -395,6 +395,14 @@ void TimelineView::revealAudioLevel(core::LayerId layer) {
     update();
 }
 
+void TimelineView::refreshRows() {
+    // Key refs are flat property indices; removing a mask shifts them, so a kept
+    // selection could point Delete at a different property's keys.
+    selectedKeys_.clear();
+    rebuildRows();
+    update();
+}
+
 void TimelineView::toggleExpanded(core::LayerId layer) {
     if (comp_ == nullptr) {
         return;
@@ -608,7 +616,7 @@ const Property* TimelineView::propertyFor(const Layer& layer, int effect, int in
     if (e >= layer.effects.size()) {
         return nullptr;
     }
-    return i < layer.effects[e].params.size() ? &layer.effects[e].params[i] : nullptr;
+    return layer.effects[e].property(i);
 }
 
 void TimelineView::rebuildRows() {
@@ -685,8 +693,9 @@ void TimelineView::rebuildRows() {
             y += metrics::kPropertyRowH;
 
             if (effect.expanded) {
-                for (std::size_t i = 0; i < effect.params.size(); ++i) {
-                    if (!animatedOnly || effect.params[i].animated()) {
+                // Flat index: the effect's own params, then its masks' params.
+                for (std::size_t i = 0; i < effect.propertyCount(); ++i) {
+                    if (!animatedOnly || effect.property(i)->animated()) {
                         pushProperty(static_cast<int>(e), i);
                     }
                 }
@@ -771,8 +780,17 @@ void TimelineView::paintGroupKeys(QPainter& p, const Row& row, const Layer& laye
         return;  // open, so the keys are on the rows below where they belong
     }
 
-    const std::vector<core::Property>& props =
-        isTransform ? layer.properties : layer.effects[e].params;
+    // Includes an effect's mask params, so collapsing it doesn't hide mask animation.
+    std::vector<const core::Property*> props;
+    if (isTransform) {
+        for (const core::Property& prop : layer.properties) {
+            props.push_back(&prop);
+        }
+    } else {
+        for (std::size_t i = 0; i < layer.effects[e].propertyCount(); ++i) {
+            props.push_back(layer.effects[e].property(i));
+        }
+    }
     const core::TimeContext ctx = comp_->timeContext();
     const int cy = row.top + row.height / 2;
 
@@ -782,8 +800,8 @@ void TimelineView::paintGroupKeys(QPainter& p, const Row& row, const Layer& laye
     p.setPen(QPen(kTextTertiary, 1.0));
     p.setBrush(Qt::NoBrush);
 
-    for (const core::Property& prop : props) {
-        for (const core::Keyframe& k : prop.keys) {
+    for (const core::Property* prop : props) {
+        for (const core::Keyframe& k : prop->keys) {
             const double x = xForTime(to_seconds(k.time, ctx));
             if (x < trackLeft() - 8.0 || x > width() + 8.0) {
                 continue;
@@ -1088,10 +1106,10 @@ bool TimelineView::nearestKey(const core::Layer& layer, bool forward, double& ou
     for (const core::Property& prop : layer.properties) {
         consider(prop);
     }
-    // Effect parameters count too, not just the layer's own.
+    // Effect parameters and their masks count too, not just the layer's own.
     for (const core::EffectInstance& fx : layer.effects) {
-        for (const core::Property& prop : fx.params) {
-            consider(prop);
+        for (std::size_t i = 0; i < fx.propertyCount(); ++i) {
+            consider(*fx.property(i));
         }
     }
     out = best;
@@ -1808,11 +1826,10 @@ void TimelineView::mousePressEvent(QMouseEvent* e) {
                 if (row.propertyIndex < static_cast<int>(owner->properties.size())) {
                     prop = &owner->properties[static_cast<std::size_t>(row.propertyIndex)];
                 }
-            } else if (row.effect < static_cast<int>(owner->effects.size())) {
-                auto& params = owner->effects[static_cast<std::size_t>(row.effect)].params;
-                if (row.propertyIndex < static_cast<int>(params.size())) {
-                    prop = &params[static_cast<std::size_t>(row.propertyIndex)];
-                }
+            } else if (row.effect < static_cast<int>(owner->effects.size()) &&
+                       row.propertyIndex >= 0) {
+                prop = owner->effects[static_cast<std::size_t>(row.effect)].property(
+                    static_cast<std::size_t>(row.propertyIndex));
             }
             if (prop == nullptr) {
                 return;
@@ -2650,6 +2667,12 @@ void TimelinePanel::refresh() {
                        static_cast<int>(comp->layers.size()), comp->totalKeyframes());
     }
     view_->update();
+}
+
+void TimelinePanel::refreshRows() {
+    view_->refreshRows();
+    syncScrollRange();
+    refresh();
 }
 
 void TimelinePanel::setCachedSpans(std::vector<TimelineView::CachedSpan> spans) {

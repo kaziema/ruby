@@ -97,6 +97,10 @@ public:
     // Clicking the twirl arrow. Always shows everything.
     void toggleExpanded(core::LayerId layer);
 
+    // Rows changed shape (a mask added or removed) without the comp changing. Unlike
+    // setComposition, keeps the selection.
+    void refreshRows();
+
 
     // --- Horizontal zoom -----------------------------------------------------
     //
@@ -351,6 +355,7 @@ public:
 
     // Refreshes sub-toolbar counts after an inspector edit (which can add a keyframe).
     void refresh();
+    void refreshRows();
 
     // Zoom, forwarded so the window can bind keys without reaching into the view.
     void zoomIn();

@@ -1,13 +1,16 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <QRect>
 #include <QWidget>
 
 class QLineEdit;
+class QMenu;
 
 #include "ruby/core/Document.h"
 
@@ -34,6 +37,9 @@ signals:
     void editBegan(const QString& label);
     void editEnded();
 
+    // An effect gained or lost a mask, so property rows elsewhere changed shape.
+    void effectsChanged();
+
 protected:
     bool event(QEvent* e) override;
     void paintEvent(QPaintEvent*) override;
@@ -43,6 +49,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* e) override;
 
     // Right click on a property opens the expression menu (the only place to write one).
+    // On an effect's property or header it also carries the mask commands.
     void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
@@ -85,12 +92,20 @@ private:
     void commitEditor();
     void editExpression(const PropRef& ref);
 
+    // Mask commands; each is one undo step.
+    void addMaskMenu(QMenu& menu, int effect);
+    void maskMenu(QMenu& menu, int effect, int mask);
+    void editMasks(int effect, const QString& label,
+                   const std::function<void(core::EffectInstance&)>& change);
+
     core::Composition* comp_ = nullptr;
     std::optional<core::LayerId> selected_;
     double currentTime_ = 0.0;
     std::vector<GroupRow> groups_;
 
     std::vector<ValueField> fields_;  // rebuilt every paint
+    // Effect group headers as painted, so right-click hit-tests what's actually on screen.
+    std::vector<std::pair<QRect, int>> effectHeaders_;
     bool dragging_ = false;
     ValueField dragField_;
     double dragStartValue_ = 0.0;

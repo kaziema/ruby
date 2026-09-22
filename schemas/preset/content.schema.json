@@ -62,6 +62,26 @@
         },
         "name": { "type": "string" },
         "enabled": { "type": "boolean" },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/property" } },
+        "masks": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/mask" },
+          "description": "Where this effect applies. Framework-level, so every effect takes them without knowing they exist."
+        }
+      }
+    },
+    "mask": {
+      "type": "object",
+      "required": ["shape"],
+      "properties": {
+        "name": { "type": "string" },
+        "shape": {
+          "enum": ["rectangle", "ellipse"],
+          "description": "Refused if unknown, never guessed: a newer shape read as a rectangle would silently change what the effect covers."
+        },
+        "mode": { "enum": ["add", "subtract", "intersect", "none"] },
+        "inverted": { "type": "boolean" },
         "params": { "type": "array", "items": { "$ref": "#/$defs/property" } }
       }
     },
@@ -72,7 +92,7 @@
         "key": { "type": "string", "description": "Immortal. Never renamed, never retyped." },
         "label": { "type": "string" },
         "unit": {
-          "enum": ["px", "percent-of-width", "percent-of-height", "percent-of-diagonal", "degrees", "percent", "normalized"],
+          "enum": ["px", "percent-of-width", "percent-of-height", "percent-of-diagonal", "degrees", "percent", "normalized", "decibels"],
           "description": "Why a preset authored on 1080x1920 lands correctly on 1920x1080. An unknown unit is refused, never defaulted: reading it as `normalized` would silently reinterpret every stored value."
         },
         "value": { "description": "Scalar or array, matching the parameter's component count." },

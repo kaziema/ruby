@@ -151,6 +151,41 @@ enum class LabelColor {
 
 [[nodiscard]] LabelColor defaultLabelFor(LayerKind kind) noexcept;
 
+// --- Masks -------------------------------------------------------------------
+//
+// Framework-level, not per-effect: any effect restricts itself to a mask without knowing
+// masks exist. Bezier paths come later as a third shape.
+
+enum class MaskShape {
+    Rectangle,
+    Ellipse,
+};
+
+// Combined in list order, like AE. None keeps the mask but ignores it.
+enum class MaskMode {
+    Add,
+    Subtract,
+    Intersect,
+    None,
+};
+
+// Geometry is layer-relative percent (center/size) so a mask survives a resolution
+// change; feather and expansion are percent of layer width.
+struct Mask {
+    std::string name;
+    MaskShape shape = MaskShape::Rectangle;
+    MaskMode mode = MaskMode::Add;
+    bool inverted = false;
+    std::vector<Property> params;  // center, size, rotation, feather, expansion, opacity
+
+    [[nodiscard]] Property* find(std::string_view key) noexcept;
+    [[nodiscard]] const Property* find(std::string_view key) const noexcept;
+};
+
+// The one authority for a mask's parameter set: keys, labels, units, ranges, defaults.
+// Used on creation and on load, so ranges stay schema-owned rather than saved.
+[[nodiscard]] Mask makeMask(MaskShape shape, std::string name);
+
 // One effect applied to a layer. Parameters are Properties, so every control animates
 // for free. `effectId`+`schema` are the identity pair driving migrations.
 struct EffectInstance {
@@ -160,10 +195,26 @@ struct EffectInstance {
     bool enabled = true;
     bool expanded = true;  // its parameters showing under it in the timeline
     std::vector<Property> params;
+    std::vector<Mask> masks;
+
+    // Fixed so masks fit the effect uniform block.
+    static constexpr int kMaxMasks = 4;
 
     [[nodiscard]] Property* find(std::string_view key) noexcept;
     [[nodiscard]] const Property* find(std::string_view key) const noexcept;
+
+    // Flat addressing used by the inspector and timeline: the effect's own params first,
+    // then each mask's params in order. Lets rows/fields stay (effect, index) pairs.
+    [[nodiscard]] std::size_t propertyCount() const noexcept;
+    [[nodiscard]] Property* property(std::size_t index) noexcept;
+    [[nodiscard]] const Property* property(std::size_t index) const noexcept;
+    // Which mask a flat index belongs to, or -1 for the effect's own params.
+    [[nodiscard]] int maskOf(std::size_t index) const noexcept;
 };
+
+// Masks that affect the picture: mode != None, capped at kMaxMasks, in order. The single
+// definition both the compositor and the render graph use, so what's hashed is what's drawn.
+[[nodiscard]] std::vector<const Mask*> activeMasks(const EffectInstance& effect);
 
 // Min/max per time bucket, precomputed for drawing — avoids touching millions of raw
 // samples per repaint, and keeps the document decoder-agnostic.

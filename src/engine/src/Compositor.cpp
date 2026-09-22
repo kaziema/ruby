@@ -48,8 +48,9 @@ fn fs(in : VsOut) -> @location(0) vec4<f32> {
 }
 )";
 
-// Uniform block is 80 bytes; 256 is the safe alignment floor across backends.
-constexpr std::size_t kUniformStride = 256;
+// Largest block is EffectUniforms (336 bytes); a multiple of 256, the safe alignment
+// floor across backends.
+constexpr std::size_t kUniformStride = 512;
 
 struct Rgb {
     float r;
@@ -57,10 +58,45 @@ struct Rgb {
     float b;
 };
 
-// Mirrors the WGSL EffectUniforms block: eight vec4 slots, filled in schema order.
+// Mirrors the WGSL EffectUniforms block in EffectRegistry.cpp: params in schema order,
+// then three vec4 per active mask, then the mask count.
 struct EffectUniforms {
     float params[8][4];
+    float masks[core::EffectInstance::kMaxMasks * 3][4];
+    float maskInfo[4];
 };
+static_assert(sizeof(EffectUniforms) <= kUniformStride);
+
+void packMasks(const core::EffectInstance& effect, double seconds,
+               const core::TimeContext& ctx, EffectUniforms& u) {
+    const std::vector<const core::Mask*> masks = core::activeMasks(effect);
+    const auto value = [&](const core::Mask& m, const char* key) {
+        const core::Property* p = m.find(key);
+        return p != nullptr ? p->evaluate(seconds, ctx) : core::Value{};
+    };
+    for (std::size_t i = 0; i < masks.size(); ++i) {
+        const core::Mask& m = *masks[i];
+        const core::Value center = value(m, "center");
+        const core::Value size = value(m, "size");
+        float* m0 = u.masks[i * 3];
+        float* m1 = u.masks[i * 3 + 1];
+        float* m2 = u.masks[i * 3 + 2];
+        m0[0] = static_cast<float>(center.c[0]);
+        m0[1] = static_cast<float>(center.c[1]);
+        m0[2] = static_cast<float>(size.c[0]);
+        m0[3] = static_cast<float>(size.c[1]);
+        m1[0] = static_cast<float>(value(m, "rotation").x());
+        m1[1] = static_cast<float>(value(m, "feather").x());
+        m1[2] = static_cast<float>(value(m, "expansion").x());
+        m1[3] = static_cast<float>(value(m, "opacity").x());
+        m2[0] = m.shape == core::MaskShape::Ellipse ? 1.0f : 0.0f;
+        m2[1] = m.mode == core::MaskMode::Subtract    ? 1.0f
+                : m.mode == core::MaskMode::Intersect ? 2.0f
+                                                      : 0.0f;
+        m2[2] = m.inverted ? 1.0f : 0.0f;
+    }
+    u.maskInfo[0] = static_cast<float>(masks.size());
+}
 
 // UI's sRGB label hexes converted to linear, since compositing happens in linear light.
 float toLinear(float srgb) noexcept {
@@ -301,6 +337,7 @@ gpu::TextureHandle Compositor::applyEffects(gpu::CommandRecorder& commands,
                     (c < v.count) ? v.c[static_cast<std::size_t>(c)] : 0.0);
             }
         }
+        packMasks(effect, seconds, ctx, u);
 
         const gpu::BufferHandle buffer = uniformBuffer(slot++);
         device_.write_buffer(buffer, &u, sizeof(u));
